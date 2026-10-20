@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.60
+// @version      3.61
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -40,7 +40,7 @@
 //
 // RIGHT (API) codes:
 //   API <n>s     faction/?selections=chain (Public key); <n> = age of the
-//                data in seconds. Polled every 30s, shared across tabs.
+//                data in seconds. Polled every 10s, shared across tabs.
 //   API-ERR<n>   Torn API returned error code <n> (e.g. 2 bad key, 5 rate limit)
 //   API-NET      API request failed (network / fetch error)
 //   NO KEY       No API key set (OPT)
@@ -57,7 +57,7 @@
     const minID = 3000000;
     const maxID = 3400000;
 
-    const API_INTERVAL = 30000;
+    const API_INTERVAL = 10000;
 
     if (window.top !== window.self) return;
     if (document.getElementById('pda-chain-timer-container')) return;
@@ -459,7 +459,7 @@
     }
 
     // -------------------------------------------------------------------
-    // 5. API timer (right): Torn API only, polled every 30s and shared across tabs
+    // 5. API timer (right): Torn API only, polled every 10s and shared across tabs
     // -------------------------------------------------------------------
     function fetchApiChain() {
         localStorage.setItem('pda_chain_timer_api_last_call', Date.now());

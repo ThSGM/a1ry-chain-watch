@@ -6,7 +6,7 @@ mobile layout and in TornPDA.
 It shows two timers side by side, so you can tell straight away if one of them stops working:
 
 - **Left: local.** Read from the page or Torn's own sidebar data, with no API calls.
-- **Right: API.** From the Torn API (a Public key is enough), checked every 30 s.
+- **Right: API.** From the Torn API (a Public key is enough), checked every 10 s.
 
 The small grey text under each timer says where the time came from (e.g. `BAR`, `SES`, `API 12s`).
 The codes are listed at the top of the script.
