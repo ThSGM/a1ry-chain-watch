@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.61
+// @version      3.62
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -28,10 +28,11 @@
 //   1. BAR      Sidebar chain bar time       a[class*="chainBar___"] (or old
 //               chain-bar___), the element inside it whose text is M:SS.
 //               Desktop width only: the mobile bar shows just the count.
-//   2. SES      Torn's own sidebar data in sessionStorage "sidebarData<userID>",
+//   2. ATK      Attack page header "(M:SS)"  [class*="labelTitle___"]
+//   3. SES      Torn's own sidebar data in sessionStorage "sidebarData<userID>",
 //               chain.timestampToUpdate (end time, Unix seconds). Works on
-//               desktop, mobile and PDA; 0 means no chain.
-//   3. ATK      Attack page header "(M:SS)"  [class*="labelTitle___"]
+//               desktop, mobile and PDA; 0 means no chain. Goes stale on pages
+//               without the sidebar (e.g. the attack page).
 //   4. DOM      Any element with "chain" in class/id holding a standalone
 //               0:00-5:59 time, not part of HH:MM:SS (loose fallback)
 //   5. MEM-<x>  Local expire time saved by this or another tab; <x> is the
@@ -417,20 +418,22 @@
             }
         }
 
-        // Priority 2: Torn's sessionStorage sidebar data (works in the mobile layout and PDA)
-        if (seconds < 0) {
-            const chain = readSessionChain();
-            if (chain && typeof chain.timestampToUpdate === 'number') {
-                seconds = Math.max(0, chain.timestampToUpdate - Math.floor(Date.now() / 1000));
-                src = 'SES';
-            }
-        }
-
+        // Priority 2: Attack page header. Checked before SES because the attack page has no
+        // sidebar, so Torn stops refreshing sidebarData there and SES goes stale
         if (seconds < 0) {
             const attackTimerContainers = document.querySelectorAll('[class*="labelTitle___"]');
             for (const item of attackTimerContainers) {
                 const match = item.textContent.match(/\((\d{1,2}:\d{2})\)/);
                 if (match) { seconds = parseTimeStringToSeconds(match[1]); src = 'ATK'; break; }
+            }
+        }
+
+        // Priority 3: Torn's sessionStorage sidebar data (works in the mobile layout and PDA)
+        if (seconds < 0) {
+            const chain = readSessionChain();
+            if (chain && typeof chain.timestampToUpdate === 'number') {
+                seconds = Math.max(0, chain.timestampToUpdate - Math.floor(Date.now() / 1000));
+                src = 'SES';
             }
         }
 
