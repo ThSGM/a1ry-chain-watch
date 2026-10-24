@@ -6,14 +6,18 @@ mobile layout and in TornPDA.
 It shows two timers side by side, so you can tell straight away if one of them stops working:
 
 - **Left: local.** Read from the page or Torn's own sidebar data, with no API calls.
-- **Right: API.** From the Torn API (a Public key is enough), checked every 10 s.
+- **Right: API.** From the Torn API (a Public key is enough), checked every 5 s during a chain
+  (every 30 s otherwise).
 
 The small grey text under each timer says where the time came from (e.g. `BAR`, `SES`, `API 12s`).
 The codes are listed at the top of the script.
 
 ## Features
 
-- Flashes and beeps when the chain drops below your alert time (set in **OPT**).
+- Flashes and beeps every second when the chain drops to your alert time (default 2:30).
+  Tap **ACK** to silence it; from the emergency time (default 1:30) it comes back and can't be
+  silenced. Both times are set in **OPT**. A hit cancels the acknowledgement.
+- Minimised, it gives no alarm at all.
 - Shows the chain count (e.g. `5/10`) in the top-left corner.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
 - Tap **||** to minimise it; tap the circle to bring it back.
@@ -26,7 +30,8 @@ The codes are listed at the top of the script.
   [`a1ry-chain-watch.user.js`](https://github.com/ThSGM/a1ry-chain-watch/raw/main/a1ry-chain-watch.user.js).
 - **TornPDA:** add it under the app's userscript settings, set to run on `torn.com`.
 
-Then tap **OPT**, enter a Public API key for the right-hand timer, and set your alert time.
+Then tap **OPT**, enter a Public API key for the right-hand timer, and set your alert and
+emergency times.
 
 ## Credits
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.62
+// @version      3.70
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -41,13 +41,20 @@
 //
 // RIGHT (API) codes:
 //   API <n>s     faction/?selections=chain (Public key); <n> = age of the
-//                data in seconds. Polled every 10s, shared across tabs.
+//                data in seconds. Polled every 5s during a chain (30s
+//                otherwise), shared across tabs.
 //   API-ERR<n>   Torn API returned error code <n> (e.g. 2 bad key, 5 rate limit)
 //   API-NET      API request failed (network / fetch error)
 //   NO KEY       No API key set (OPT)
 //
 // The alert follows the left timer, or the right one when the left has
 // nothing. Chain count (top-left, e.g. 5/10) comes from the API.
+//
+// Alarm (both times set in OPT):
+//   At or below the alert time (default 2:30) it flashes and beeps every
+//   second. ACK silences it until the emergency time (default 1:30); from
+//   there it can't be silenced. The acknowledgement is shared across tabs
+//   and page loads, and a hit cancels it. Minimised (||) = no alarm at all.
 // -------------------------------------------------------------------
 
 (function() {
@@ -58,19 +65,35 @@
     const minID = 3000000;
     const maxID = 3400000;
 
-    const API_INTERVAL = 10000;
+    // API calls are shared across tabs: every 5s during a chain, every 30s otherwise.
+    // Torn allows 100 calls a minute per user in total
+    const API_INTERVAL_CHAIN = 5000;
+    const API_INTERVAL_IDLE = 30000;
+    // An acknowledgement whose saved end time is further than this from the current one is
+    // from before a hit (hits move it by minutes); the slack covers sources differing by 1-2 s
+    const ACK_TOLERANCE = 10000;
 
     if (window.top !== window.self) return;
     if (document.getElementById('pda-chain-timer-container')) return;
 
     let audioCtx = null;
+    let apiCallStarted = 0; // when the pending API call started, 0 if none
     let isDragging = false;
     let hasMoved = false;
     let pressedOnDisplay = false;
     let offsetX, offsetY;
     let startX, startY;
 
-    let alertThreshold = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold')) || 120;
+    // First run of 3.70 (no emergency time saved yet): move the old default alert time of
+    // 120 s to the new default of 150 s. Any other saved value is kept
+    if (!localStorage.getItem('pda_chain_timer_critical_threshold') &&
+        localStorage.getItem('pda_chain_timer_alert_threshold') === '120') {
+        localStorage.setItem('pda_chain_timer_alert_threshold', 150);
+    }
+    let alertThreshold = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold')) || 150;
+    let criticalThreshold = parseInt(localStorage.getItem('pda_chain_timer_critical_threshold')) || 90;
+    localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
+    let alarmSeconds = 0;
     let apiKey = localStorage.getItem('pda_chain_timer_api_key') || '';
     let isPaused = localStorage.getItem('pda_chain_timer_is_paused') === 'true';
 
@@ -80,14 +103,15 @@
     const container = document.createElement('div');
     container.id = 'pda-chain-timer-container';
 
-    function applyNativeBounds() {
-        if (!localStorage.getItem('pda_chain_timer_y_type')) {
-            localStorage.setItem('pda_chain_timer_y_type', 'top');
-            localStorage.setItem('pda_chain_timer_y_val', parseFloat(localStorage.getItem('pda_chain_timer_top')) || 60);
-            localStorage.setItem('pda_chain_timer_x_type', 'left');
-            localStorage.setItem('pda_chain_timer_x_val', parseFloat(localStorage.getItem('pda_chain_timer_left')) || 10);
-        }
+    // First run: default position, or the one saved by the original script (top/left keys)
+    if (!localStorage.getItem('pda_chain_timer_y_type')) {
+        localStorage.setItem('pda_chain_timer_y_type', 'top');
+        localStorage.setItem('pda_chain_timer_y_val', parseFloat(localStorage.getItem('pda_chain_timer_top')) || 60);
+        localStorage.setItem('pda_chain_timer_x_type', 'left');
+        localStorage.setItem('pda_chain_timer_x_val', parseFloat(localStorage.getItem('pda_chain_timer_left')) || 10);
+    }
 
+    function applyNativeBounds() {
         let xType = localStorage.getItem('pda_chain_timer_x_type');
         let xVal = localStorage.getItem('pda_chain_timer_x_val');
         let yType = localStorage.getItem('pda_chain_timer_y_type');
@@ -143,7 +167,8 @@
         #pda-timer-header { background: #222 !important; padding: 3px 6px; font-size: 10px; text-transform: uppercase; font-weight: bold; color: #aaa !important; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
         .pda-timer-controls { display: flex; align-items: center; gap: 4px; }
         .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: 10px; font-weight: bold; padding: 1px 6px; border-radius: 3px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: 22px; }
-        #pda-timer-pause-btn.paused-state { background: #b32424 !important; }
+        #pda-timer-ack-btn { background: #b32424 !important; }
+        #pda-timer-ack-btn:disabled { opacity: 0.4; cursor: default; }
         #pda-timer-display { position: relative; flex: 1; display: flex; background-color: #111; color: #fff !important; }
         .pda-timer-half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: 17px; line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
@@ -153,9 +178,15 @@
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
         #pda-settings-close { background: #2a662a !important; margin-top: 2px; }
+        .pda-setting-info { margin-top: 4px; font-size: 8px; line-height: 1.25; color: #999; }
+        /* While OPT is open the box grows to fit the panel, which replaces the timers */
+        #pda-chain-timer-container.pda-settings-open { height: auto; }
+        .pda-settings-open #pda-timer-display { display: none; }
+        .pda-settings-open #pda-settings-panel { position: static; }
 
         .timer-warning-active { border-color: #ff2a2a !important; }
         .timer-warning-active #pda-timer-display { animation: pda-timer-flash 0.8s infinite alternate; }
+        .timer-acknowledged { border-color: #b36b00 !important; }
         @keyframes pda-timer-flash { from { background-color: #111; } to { background-color: #b30000; } }
     `;
     document.head.appendChild(style);
@@ -164,6 +195,7 @@
         <div id="pda-timer-header">
             <span>Chain</span>
             <div class="pda-timer-controls">
+                <button class="pda-btn" id="pda-timer-ack-btn" title="Silence the alarm until the emergency time" style="display: none;">ACK</button>
                 <button class="pda-btn" id="pda-timer-cfg-btn" title="Settings">OPT</button>
                 <button class="pda-btn" id="pda-timer-pause-btn" title="Pause/Resume">||</button>
             </div>
@@ -182,14 +214,22 @@
 
         <div id="pda-settings-panel">
             <div class="pda-setting-row">
-                <span>Alert (s):</span>
+                <span title="Alarm starts here; ACK can silence it">Alert (s):</span>
                 <input type="number" id="pda-threshold-input" min="1" max="300">
+            </div>
+            <div class="pda-setting-row">
+                <span title="Alarm comes back here and can't be silenced">Emergency (s):</span>
+                <input type="number" id="pda-critical-input" min="1" max="300">
             </div>
             <div class="pda-setting-row">
                 <span>Public API:</span>
                 <input type="password" id="pda-api-input" placeholder="key">
             </div>
             <button class="pda-btn" id="pda-settings-close">Save</button>
+            <div class="pda-setting-info">
+                Left timer scrapes page; right timer uses Public API. This is designed to work on
+                PC, mobile (Firefox), PDA. Press the timer for a random inactive target.
+            </div>
         </div>
     `;
     document.body.appendChild(container);
@@ -201,13 +241,16 @@
     const apiLabel = container.querySelector('#pda-timer-source-api');
     const countLabel = container.querySelector('#pda-timer-count');
     const pauseBtn = container.querySelector('#pda-timer-pause-btn');
+    const ackBtn = container.querySelector('#pda-timer-ack-btn');
     const cfgBtn = container.querySelector('#pda-timer-cfg-btn');
     const settingsPanel = container.querySelector('#pda-settings-panel');
     const closeSettingsBtn = container.querySelector('#pda-settings-close');
     const thresholdInput = container.querySelector('#pda-threshold-input');
+    const criticalInput = container.querySelector('#pda-critical-input');
     const apiInput = container.querySelector('#pda-api-input');
 
     thresholdInput.value = alertThreshold;
+    criticalInput.value = criticalThreshold;
     apiInput.value = apiKey;
 
     function formatSecondsToTimeString(totalSeconds) {
@@ -226,9 +269,15 @@
     // -------------------------------------------------------------------
     // Local timer storage (separate from the API's, so neither feeds the other)
     // -------------------------------------------------------------------
+    // Only writes when the end time moves by more than 2s (a whole-second time read
+    // each tick wobbles by up to 1s) or the source changes, not on every tick
     function saveLocalExpire(seconds, src) {
-        localStorage.setItem('pda_chain_timer_local_expire', Date.now() + (seconds * 1000));
-        localStorage.setItem('pda_chain_timer_local_src', src);
+        const expire = Date.now() + (seconds * 1000);
+        const saved = parseInt(localStorage.getItem('pda_chain_timer_local_expire')) || 0;
+        if (Math.abs(expire - saved) > 2000 || localStorage.getItem('pda_chain_timer_local_src') !== src) {
+            localStorage.setItem('pda_chain_timer_local_expire', expire);
+            localStorage.setItem('pda_chain_timer_local_src', src);
+        }
     }
 
     function localMemorySource() {
@@ -256,8 +305,6 @@
         container.style.bottom = 'auto';
         container.style.left = rect.left + 'px';
         container.style.top = rect.top + 'px';
-
-        initAudioContext();
     });
 
     document.addEventListener('pointermove', (e) => {
@@ -324,7 +371,10 @@
     // -------------------------------------------------------------------
     // 3. UI Interaction Listeners
     // -------------------------------------------------------------------
-    cfgBtn.addEventListener('click', () => settingsPanel.style.display = 'flex');
+    cfgBtn.addEventListener('click', () => {
+        settingsPanel.style.display = 'flex';
+        container.classList.add('pda-settings-open');
+    });
 
     closeSettingsBtn.addEventListener('click', () => {
         let val = parseInt(thresholdInput.value, 10);
@@ -332,9 +382,15 @@
             alertThreshold = val;
             localStorage.setItem('pda_chain_timer_alert_threshold', alertThreshold);
         }
+        val = parseInt(criticalInput.value, 10);
+        if (!isNaN(val) && val > 0) {
+            criticalThreshold = val;
+            localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
+        }
         apiKey = apiInput.value.trim();
         localStorage.setItem('pda_chain_timer_api_key', apiKey);
         settingsPanel.style.display = 'none';
+        container.classList.remove('pda-settings-open');
     });
 
     function togglePauseMinimize() {
@@ -342,12 +398,23 @@
         localStorage.setItem('pda_chain_timer_is_paused', isPaused);
         if (isPaused) container.classList.add('pda-minimized');
         else container.classList.remove('pda-minimized');
+        if (isPaused) updateAlarm(0);
     }
 
     pauseBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         togglePauseMinimize();
     });
+
+    ackBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (alarmSeconds <= criticalThreshold) return;
+        localStorage.setItem('pda_chain_timer_ack_end', Date.now() + (alarmSeconds * 1000));
+        updateAlarm(alarmSeconds);
+    });
+
+    // Unlock audio on a tap anywhere on the page, so the alarm can sound after a page load
+    document.addEventListener('pointerdown', initAudioContext, true);
 
     function initAudioContext() {
         try {
@@ -374,6 +441,30 @@
             osc.start();
             osc.stop(audioCtx.currentTime + 0.2);
         } catch (e) {}
+    }
+
+    // -------------------------------------------------------------------
+    // Alarm: sounds at or below the alert time unless acknowledged; can't be
+    // acknowledged at or below the emergency time (criticalThreshold). 0 = no alarm (no chain, minimised)
+    // -------------------------------------------------------------------
+    // The acknowledgement is saved as the chain end time it was given for, so it
+    // carries across tabs and page loads, and a hit (new end time) cancels it
+    function isAcknowledged(seconds) {
+        const ackEnd = parseInt(localStorage.getItem('pda_chain_timer_ack_end')) || 0;
+        return Math.abs(Date.now() + (seconds * 1000) - ackEnd) <= ACK_TOLERANCE;
+    }
+
+    function updateAlarm(seconds) {
+        alarmSeconds = seconds;
+        const inAlert = seconds > 0 && seconds <= alertThreshold;
+        const critical = inAlert && seconds <= criticalThreshold;
+        const sounding = critical || (inAlert && !isAcknowledged(seconds));
+
+        container.classList.toggle('timer-warning-active', sounding);
+        container.classList.toggle('timer-acknowledged', inAlert && !sounding);
+        ackBtn.style.display = sounding ? '' : 'none';
+        ackBtn.disabled = critical;
+        if (sounding) playQuietAlert();
     }
 
     function parseTimeStringToSeconds(timeStr) {
@@ -462,10 +553,13 @@
     }
 
     // -------------------------------------------------------------------
-    // 5. API timer (right): Torn API only, polled every 10s and shared across tabs
+    // 5. API timer (right): Torn API only, polled every 5s during a chain (30s otherwise)
+    //    and shared across tabs
     // -------------------------------------------------------------------
     function fetchApiChain() {
         localStorage.setItem('pda_chain_timer_api_last_call', Date.now());
+        // One call at a time, so a slow reply can't overwrite a newer one
+        apiCallStarted = Date.now();
         fetch(`https://api.torn.com/faction/?selections=chain&key=${apiKey}`)
             .then(response => response.json())
             .then(data => {
@@ -483,20 +577,26 @@
             .catch(err => {
                 localStorage.setItem('pda_chain_timer_api_error', 'API-NET');
                 console.error(err);
-            });
+            })
+            .finally(() => { apiCallStarted = 0; });
     }
 
-    function updateApiTimer() {
+    // chainActive: the local timer sees a chain, so switch to the faster polling
+    // without waiting for the API to notice it
+    function updateApiTimer(chainActive) {
         if (!apiKey) {
             apiText.textContent = '--:--';
             apiLabel.textContent = 'NO KEY';
             return 0;
         }
 
-        const lastCall = parseInt(localStorage.getItem('pda_chain_timer_api_last_call')) || 0;
-        if (Date.now() - lastCall > API_INTERVAL) fetchApiChain();
-
         const seconds = secondsUntil('pda_chain_timer_api_expire');
+        const interval = (chainActive || seconds > 0) ? API_INTERVAL_CHAIN : API_INTERVAL_IDLE;
+        const lastCall = parseInt(localStorage.getItem('pda_chain_timer_api_last_call')) || 0;
+        // A call pending for over 15s is treated as lost, so a hung request can't block polling
+        const pending = Date.now() - apiCallStarted < 15000;
+        if (!pending && Date.now() - lastCall > interval) fetchApiChain();
+
         const error = localStorage.getItem('pda_chain_timer_api_error');
         const fetchedAt = parseInt(localStorage.getItem('pda_chain_timer_api_time')) || 0;
 
@@ -531,20 +631,18 @@
             }
         }
 
-        if (isPaused || document.hidden) return;
+        // Minimised means no alarm at all, even below the emergency time
+        if (isPaused || document.hidden) {
+            updateAlarm(0);
+            return;
+        }
 
         const localSeconds = updateLocalTimer();
-        const apiSeconds = updateApiTimer();
+        const apiSeconds = updateApiTimer(localSeconds > 0);
         countLabel.textContent = localStorage.getItem('pda_chain_timer_count') || '';
 
         // Alert follows the local timer; the API is the backup when the local one has nothing
-        const alertSeconds = localSeconds > 0 ? localSeconds : apiSeconds;
-        if (alertSeconds > 0 && alertSeconds <= alertThreshold) {
-            container.classList.add('timer-warning-active');
-            playQuietAlert();
-        } else {
-            container.classList.remove('timer-warning-active');
-        }
+        updateAlarm(localSeconds > 0 ? localSeconds : apiSeconds);
 
     }, 1000);
 })();
