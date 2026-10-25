@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.73
+// @version      3.74
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -196,6 +196,7 @@
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
         .pda-setting-row input[type="checkbox"] { width: auto; margin: 0; }
+        .pda-setting-pair { display: flex; align-items: center; gap: 6px; }
         .pda-setting-buttons { display: flex; gap: 4px; margin-top: 2px; }
         #pda-settings-close { background: #2a662a !important; flex: 1; }
         /* Help scrolls on its own; pan-y overrides the box's touch-action: none so it scrolls on touch */
@@ -205,8 +206,9 @@
         /* While OPT is open the box grows to fit the panel, which replaces the timers, and the
            panel is drawn at 1.5x size so it's easier to use. Sizes are set directly rather than
            with zoom/transform, which would also move the box or let it spill off the screen.
-           The panel stays at 1.5x whatever the Size; the box only widens further for the header */
-        #pda-chain-timer-container.pda-settings-open { height: auto; width: calc(140px * max(1.5, var(--s))); }
+           The panel stays at 1.5x whatever the Size. 400px wide so labels and inputs aren't cut
+           off, but never wider than the screen (phones are often 360-430px) */
+        #pda-chain-timer-container.pda-settings-open { height: auto; width: min(400px, calc(100vw - 20px)); }
         .pda-settings-open #pda-timer-display { display: none; }
         .pda-settings-open #pda-settings-panel { position: static; padding: 6px 12px; }
         .pda-settings-open .pda-setting-row { margin-bottom: 6px; font-size: 14px; }
@@ -257,7 +259,7 @@
 
         <div id="pda-settings-panel">
             <div class="pda-setting-row">
-                <span title="Alarm starts here; ACK can silence it">Warning (s):</span>
+                <span title="Alarm starts here; ACK can silence it">Warn (s):</span>
                 <input type="number" id="pda-threshold-input" min="1" max="300">
             </div>
             <div class="pda-setting-row">
@@ -265,7 +267,7 @@
                 <input type="number" id="pda-critical-input" min="1" max="300">
             </div>
             <div class="pda-setting-row">
-                <span title="Alarm beep volume; plays a test beep when changed">Volume:</span>
+                <span title="Alarm beep volume; plays a test beep when changed">Vol:</span>
                 <input type="range" id="pda-volume-input" min="0" max="100" step="5">
             </div>
             <div class="pda-setting-row">
@@ -274,7 +276,10 @@
             </div>
             <div class="pda-setting-row">
                 <span title="Size of the timer box (OPT stays the same size)">Size:</span>
-                <input type="range" id="pda-size-input" min="75" max="200" step="5">
+                <span class="pda-setting-pair">
+                    <input type="range" id="pda-size-input" min="75" max="200" step="5">
+                    <button class="pda-btn" id="pda-size-reset" title="Back to the default size">100%</button>
+                </span>
             </div>
             <div class="pda-setting-row">
                 <span>Public API:</span>
@@ -331,6 +336,7 @@
     const volumeInput = container.querySelector('#pda-volume-input');
     const flashInput = container.querySelector('#pda-flash-input');
     const sizeInput = container.querySelector('#pda-size-input');
+    const sizeResetBtn = container.querySelector('#pda-size-reset');
     const apiInput = container.querySelector('#pda-api-input');
 
     thresholdInput.value = alertThreshold;
@@ -513,6 +519,10 @@
 
     // Size applies while dragging (the header shows it); Save keeps it
     sizeInput.addEventListener('input', () => applySize(parseInt(sizeInput.value, 10)));
+    sizeResetBtn.addEventListener('click', () => {
+        sizeInput.value = 100;
+        applySize(100);
+    });
 
     // Test beep at the chosen volume when the slider is released (the tap also unlocks audio)
     volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10)));
