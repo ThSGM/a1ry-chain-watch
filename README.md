@@ -15,7 +15,7 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
 ## Features
 
 - Flashes and beeps every second when the chain drops to your warning time (default 2:30).
-  Tap **ACK** to silence it; from the panic time (default 1:30) it comes back and can't be
+  Tap **ACK** to silence it; from the panic time (default 2:00) it comes back and can't be
   silenced. Both times are set in **OPT**. A hit cancels the acknowledgement.
 - The box and screen edges flash orange while the alarm sounds, then red and faster from the
   panic time. The beep

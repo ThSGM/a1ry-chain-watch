@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.74
+// @version      3.75
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -52,7 +52,7 @@
 //
 // Alarm (both times set in OPT):
 //   At or below the warning time (default 2:30) it flashes and beeps every
-//   second. ACK silences it until the panic time (default 1:30); from
+//   second. ACK silences it until the panic time (default 2:00); from
 //   there it can't be silenced. The acknowledgement is shared across tabs
 //   and page loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
 //   OPT also sets the beep volume and the screen-edge flash, which pulses
@@ -94,8 +94,11 @@
         localStorage.getItem('pda_chain_timer_alert_threshold') === '120') {
         localStorage.setItem('pda_chain_timer_alert_threshold', 150);
     }
-    let alertThreshold = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold')) || 150;
-    let criticalThreshold = parseInt(localStorage.getItem('pda_chain_timer_critical_threshold')) || 90;
+    // 0 is a valid setting for both (Off: no alarm / ACK always works)
+    const savedAlert = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold'));
+    const savedCritical = parseInt(localStorage.getItem('pda_chain_timer_critical_threshold'));
+    let alertThreshold = isNaN(savedAlert) ? 150 : savedAlert;
+    let criticalThreshold = isNaN(savedCritical) ? 120 : savedCritical;
     localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
     let alarmSeconds = 0;
     const savedVolume = parseInt(localStorage.getItem('pda_chain_timer_volume'));
@@ -196,7 +199,11 @@
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
         .pda-setting-row input[type="checkbox"] { width: auto; margin: 0; }
-        .pda-setting-pair { display: flex; align-items: center; gap: 6px; }
+        /* Slider / API blocks: a label row, then the input on its own full-width line */
+        .pda-setting-block { margin-bottom: 4px; }
+        .pda-setting-block .pda-setting-row { margin-bottom: 1px; }
+        .pda-setting-block > input { display: block; box-sizing: border-box; width: 100%; margin: 0; background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; }
+        .pda-slider-value { color: #fff; }
         .pda-setting-buttons { display: flex; gap: 4px; margin-top: 2px; }
         #pda-settings-close { background: #2a662a !important; flex: 1; }
         /* Help scrolls on its own; pan-y overrides the box's touch-action: none so it scrolls on touch */
@@ -206,15 +213,17 @@
         /* While OPT is open the box grows to fit the panel, which replaces the timers, and the
            panel is drawn at 1.5x size so it's easier to use. Sizes are set directly rather than
            with zoom/transform, which would also move the box or let it spill off the screen.
-           The panel stays at 1.5x whatever the Size. 400px wide so labels and inputs aren't cut
-           off, but never wider than the screen (phones are often 360-430px) */
-        #pda-chain-timer-container.pda-settings-open { height: auto; width: min(400px, calc(100vw - 20px)); }
+           The panel stays at 1.5x whatever the Size. 300px wide, but never wider than the
+           screen (phones are often 360-430px) */
+        #pda-chain-timer-container.pda-settings-open { height: auto; width: min(300px, calc(100vw - 20px)); }
         .pda-settings-open #pda-timer-display { display: none; }
         .pda-settings-open #pda-settings-panel { position: static; padding: 6px 12px; }
         .pda-settings-open .pda-setting-row { margin-bottom: 6px; font-size: 14px; }
         .pda-settings-open .pda-setting-row input { font-size: 14px; padding: 2px 4px; width: 105px; }
         .pda-settings-open .pda-setting-row input[type="checkbox"] { width: 18px; height: 18px; }
+        .pda-settings-open .pda-setting-block > input { font-size: 14px; padding: 2px 4px; }
         .pda-settings-open #pda-settings-panel .pda-btn { font-size: 15px; padding: 3px 9px; min-width: 33px; }
+        .pda-settings-open #pda-settings-panel .pda-default-btn { font-size: 12px; padding: 2px 6px; }
         .pda-settings-open #pda-help { font-size: 12px; max-height: 240px; }
 
         /* Alarm colours: orange from the warning time, red from the panic time. Border rules
@@ -258,31 +267,40 @@
         </div>
 
         <div id="pda-settings-panel">
-            <div class="pda-setting-row">
-                <span title="Alarm starts here; ACK can silence it">Warn (s):</span>
-                <input type="number" id="pda-threshold-input" min="1" max="300">
+            <div class="pda-setting-block">
+                <div class="pda-setting-row">
+                    <span title="Alarm starts here; ACK can silence it">Warn: <b class="pda-slider-value"></b></span>
+                    <button class="pda-btn pda-default-btn" data-default="150" title="Default: 2:30">Default</button>
+                </div>
+                <input type="range" id="pda-threshold-input" min="0" max="300" step="5">
             </div>
-            <div class="pda-setting-row">
-                <span title="Alarm comes back here and can't be silenced">Panic (s):</span>
-                <input type="number" id="pda-critical-input" min="1" max="300">
+            <div class="pda-setting-block">
+                <div class="pda-setting-row">
+                    <span title="Alarm comes back here and can't be silenced">Panic: <b class="pda-slider-value"></b></span>
+                    <button class="pda-btn pda-default-btn" data-default="120" title="Default: 2:00">Default</button>
+                </div>
+                <input type="range" id="pda-critical-input" min="0" max="300" step="5">
             </div>
-            <div class="pda-setting-row">
-                <span title="Alarm beep volume; plays a test beep when changed">Vol:</span>
+            <div class="pda-setting-block">
+                <div class="pda-setting-row">
+                    <span title="Alarm beep volume; plays a test beep when changed">Vol: <b class="pda-slider-value"></b></span>
+                    <button class="pda-btn pda-default-btn" data-default="20" title="Default: 20%">Default</button>
+                </div>
                 <input type="range" id="pda-volume-input" min="0" max="100" step="5">
+            </div>
+            <div class="pda-setting-block">
+                <div class="pda-setting-row">
+                    <span title="Size of the timer box (OPT stays the same size)">Size: <b class="pda-slider-value"></b></span>
+                    <button class="pda-btn pda-default-btn" data-default="100" title="Default: 100%">Default</button>
+                </div>
+                <input type="range" id="pda-size-input" min="75" max="200" step="5">
             </div>
             <div class="pda-setting-row">
                 <span title="Flash the screen edges while the alarm sounds">Screen flash:</span>
                 <input type="checkbox" id="pda-flash-input">
             </div>
-            <div class="pda-setting-row">
-                <span title="Size of the timer box (OPT stays the same size)">Size:</span>
-                <span class="pda-setting-pair">
-                    <input type="range" id="pda-size-input" min="75" max="200" step="5">
-                    <button class="pda-btn" id="pda-size-reset" title="Back to the default size">100%</button>
-                </span>
-            </div>
-            <div class="pda-setting-row">
-                <span>Public API:</span>
+            <div class="pda-setting-block">
+                <div class="pda-setting-row"><span>Public API key:</span></div>
                 <input type="text" id="pda-api-input" placeholder="key" autocomplete="off" spellcheck="false">
             </div>
             <div class="pda-setting-buttons">
@@ -336,7 +354,6 @@
     const volumeInput = container.querySelector('#pda-volume-input');
     const flashInput = container.querySelector('#pda-flash-input');
     const sizeInput = container.querySelector('#pda-size-input');
-    const sizeResetBtn = container.querySelector('#pda-size-reset');
     const apiInput = container.querySelector('#pda-api-input');
 
     thresholdInput.value = alertThreshold;
@@ -470,16 +487,10 @@
     });
 
     closeSettingsBtn.addEventListener('click', () => {
-        let val = parseInt(thresholdInput.value, 10);
-        if (!isNaN(val) && val > 0) {
-            alertThreshold = val;
-            localStorage.setItem('pda_chain_timer_alert_threshold', alertThreshold);
-        }
-        val = parseInt(criticalInput.value, 10);
-        if (!isNaN(val) && val > 0) {
-            criticalThreshold = val;
-            localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
-        }
+        alertThreshold = parseInt(thresholdInput.value, 10);
+        localStorage.setItem('pda_chain_timer_alert_threshold', alertThreshold);
+        criticalThreshold = parseInt(criticalInput.value, 10);
+        localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
         volume = parseInt(volumeInput.value, 10);
         localStorage.setItem('pda_chain_timer_volume', volume);
         flashEnabled = flashInput.checked;
@@ -517,12 +528,30 @@
         updateAlarm(alarmSeconds);
     });
 
+    // Slider value shown next to each label: times as M:SS (0 = Off), the rest in percent
+    function formatSliderValue(input) {
+        const v = parseInt(input.value, 10);
+        if (input === thresholdInput || input === criticalInput) {
+            return v ? `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}` : 'Off';
+        }
+        return v + '%';
+    }
+
+    for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput]) {
+        const block = input.closest('.pda-setting-block');
+        const valueLabel = block.querySelector('.pda-slider-value');
+        valueLabel.textContent = formatSliderValue(input);
+        input.addEventListener('input', () => { valueLabel.textContent = formatSliderValue(input); });
+        // Default: set the slider as if it were dragged there (so Size and the test beep follow)
+        block.querySelector('.pda-default-btn').addEventListener('click', (e) => {
+            input.value = e.currentTarget.dataset.default;
+            input.dispatchEvent(new Event('input'));
+            input.dispatchEvent(new Event('change'));
+        });
+    }
+
     // Size applies while dragging (the header shows it); Save keeps it
     sizeInput.addEventListener('input', () => applySize(parseInt(sizeInput.value, 10)));
-    sizeResetBtn.addEventListener('click', () => {
-        sizeInput.value = 100;
-        applySize(100);
-    });
 
     // Test beep at the chosen volume when the slider is released (the tap also unlocks audio)
     volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10)));
