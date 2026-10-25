@@ -17,11 +17,13 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
 - Flashes and beeps every second when the chain drops to your warning time (default 2:30).
   Tap **ACK** to silence it; from the panic time (default 1:30) it comes back and can't be
   silenced. Both times are set in **OPT**. A hit cancels the acknowledgement.
-- The screen edges flash red while the alarm sounds, faster from the panic time. The beep
+- The box and screen edges flash orange while the alarm sounds, then red and faster from the
+  panic time. The beep
   volume, the screen flash and the box size (75-200 %) are set in **OPT**.
 - Minimised, it gives no alarm at all.
 - Shows the chain count (e.g. `5/10`) in the top-left corner.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
+- Tap **DASH** to open the [dashboard](https://naughtybot.unifiedbot.net/) in a new tab.
 - Tap **MIN** to minimise it; tap the circle to bring it back.
 - Settings and position are shared across tabs.
 

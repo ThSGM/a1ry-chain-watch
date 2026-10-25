@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.72
+// @version      3.73
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -179,10 +179,11 @@
         #pda-chain-timer-container.pda-minimized > * { display: none !important; }
         #pda-chain-timer-container.pda-minimized::after { content: '>'; font-size: calc(20px * var(--s)); font-weight: bold; line-height: 1; }
 
-        #pda-timer-header { background: #222 !important; padding: calc(3px * var(--s)) calc(6px * var(--s)); font-size: calc(10px * var(--s)); text-transform: uppercase; font-weight: bold; color: #aaa !important; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
-        .pda-timer-controls { display: flex; align-items: center; gap: calc(4px * var(--s)); }
-        /* Narrower padding so ACK, OPT and MIN fit beside "Chain" in the 140px box */
-        .pda-timer-controls .pda-btn { padding: calc(1px * var(--s)) calc(4px * var(--s)); }
+        #pda-timer-header { background: #222 !important; padding: calc(3px * var(--s)) calc(4px * var(--s)); font-size: calc(10px * var(--s)); text-transform: uppercase; font-weight: bold; color: #aaa !important; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: calc(3px * var(--s)); }
+        .pda-timer-controls { display: flex; align-items: center; gap: calc(3px * var(--s)); }
+        /* Narrower padding so DASH, ACK, OPT and MIN fit in the 140px box */
+        #pda-timer-header .pda-btn { padding: calc(1px * var(--s)) calc(4px * var(--s)); }
+        #pda-timer-dash-btn { text-decoration: none; flex-shrink: 0; }
         .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: calc(10px * var(--s)); font-weight: bold; padding: 1px 6px; border-radius: calc(3px * var(--s)); display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: calc(22px * var(--s)); }
         #pda-timer-ack-btn { background: #b32424 !important; }
         #pda-timer-ack-btn:disabled { opacity: 0.4; cursor: default; }
@@ -214,23 +215,28 @@
         .pda-settings-open #pda-settings-panel .pda-btn { font-size: 15px; padding: 3px 9px; min-width: 33px; }
         .pda-settings-open #pda-help { font-size: 12px; max-height: 240px; }
 
-        .timer-warning-active { border-color: #ff2a2a !important; }
+        /* Alarm colours: orange from the warning time, red from the panic time. Border rules
+           carry the ID so they outrank the base border, which is also !important */
+        #pda-chain-timer-container.timer-warning-active { border-color: #ff8c00 !important; }
         .timer-warning-active #pda-timer-display { animation: pda-timer-flash 0.8s infinite alternate; }
-        .timer-acknowledged { border-color: #b36b00 !important; }
-        @keyframes pda-timer-flash { from { background-color: #111; } to { background-color: #b30000; } }
+        #pda-chain-timer-container.timer-panic { border-color: #ff2a2a !important; }
+        .timer-panic #pda-timer-display { animation-name: pda-timer-panic; }
+        #pda-chain-timer-container.timer-acknowledged { border-color: #b36b00 !important; }
+        @keyframes pda-timer-flash { from { background-color: #111; } to { background-color: #b35f00; } }
+        @keyframes pda-timer-panic { from { background-color: #111; } to { background-color: #b30000; } }
 
         /* Screen-edge flash: the glow is drawn once and only its opacity is animated, so the
            browser doesn't repaint the page. Fast = 2.5 flashes/s, under the 3/s seizure guideline */
-        #pda-chain-flash { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 999998; box-shadow: inset 0 0 40px 12px rgba(255, 0, 0, 0.9); opacity: 0; display: none; }
+        #pda-chain-flash { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 999998; box-shadow: inset 0 0 40px 12px rgba(255, 140, 0, 0.9); opacity: 0; display: none; }
         #pda-chain-flash.pda-flash-on { display: block; animation: pda-edge-flash 0.5s infinite alternate; }
-        #pda-chain-flash.pda-flash-fast { animation-duration: 0.2s; }
+        #pda-chain-flash.pda-flash-fast { animation-duration: 0.2s; box-shadow: inset 0 0 40px 12px rgba(255, 0, 0, 0.9); }
         @keyframes pda-edge-flash { from { opacity: 0; } to { opacity: 1; } }
     `;
     document.head.appendChild(style);
 
     container.innerHTML = `
         <div id="pda-timer-header">
-            <span>Chain</span>
+            <a class="pda-btn" id="pda-timer-dash-btn" href="https://naughtybot.unifiedbot.net/" target="_blank" rel="noopener" title="Open the dashboard in a new tab">DASH</a>
             <div class="pda-timer-controls">
                 <button class="pda-btn" id="pda-timer-ack-btn" title="Silence the alarm until the panic time" style="display: none;">ACK</button>
                 <button class="pda-btn" id="pda-timer-cfg-btn" title="Settings">OPT</button>
@@ -291,11 +297,12 @@
                 <b>API-ERR2</b> wrong key (5 = too many calls)<br>
                 <b>API-NET</b> no connection to the API<br>
                 <b>NO KEY</b> no API key set</p>
-                <p><b>Alarm</b>: beeps and flashes from the Warning time. <b>ACK</b> silences it until the
+                <p><b>Alarm</b>: beeps and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
                 Panic time; after that it can't be silenced. A hit cancels ACK.</p>
                 <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
-                <p>Tap the timers to open the attack page of a random inactive target. Drag the box to move it.</p>
+                <p>Tap the timers to open the attack page of a random inactive target. Drag the box to move it.
+                <b>DASH</b> opens the dashboard in a new tab.</p>
                 <p>After a page load, sound plays only once you've tapped the page.</p>
             </div>
         </div>
@@ -369,7 +376,7 @@
     // -------------------------------------------------------------------
     // Pointer events cover mouse (desktop) and touch (PDA) alike
     container.addEventListener('pointerdown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || settingsPanel.style.display === 'flex') return;
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'A' || settingsPanel.style.display === 'flex') return;
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         isDragging = true;
         hasMoved = false;
@@ -560,6 +567,7 @@
         const sounding = critical || (inAlert && !isAcknowledged(seconds));
 
         container.classList.toggle('timer-warning-active', sounding);
+        container.classList.toggle('timer-panic', critical);
         container.classList.toggle('timer-acknowledged', inAlert && !sounding);
         ackBtn.style.display = sounding ? '' : 'none';
         ackBtn.disabled = critical;
