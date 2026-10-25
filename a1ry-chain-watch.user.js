@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.71
+// @version      3.72
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -51,12 +51,12 @@
 // nothing. Chain count (top-left, e.g. 5/10) comes from the API.
 //
 // Alarm (both times set in OPT):
-//   At or below the alert time (default 2:30) it flashes and beeps every
-//   second. ACK silences it until the emergency time (default 1:30); from
+//   At or below the warning time (default 2:30) it flashes and beeps every
+//   second. ACK silences it until the panic time (default 1:30); from
 //   there it can't be silenced. The acknowledgement is shared across tabs
-//   and page loads, and a hit cancels it. Minimised (||) = no alarm at all.
+//   and page loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
 //   OPT also sets the beep volume and the screen-edge flash, which pulses
-//   faster from the emergency time.
+//   faster from the panic time.
 // -------------------------------------------------------------------
 
 (function() {
@@ -101,6 +101,7 @@
     const savedVolume = parseInt(localStorage.getItem('pda_chain_timer_volume'));
     let volume = isNaN(savedVolume) ? 20 : savedVolume; // percent; 0 is a valid (silent) setting
     let flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
+    let boxSize = parseInt(localStorage.getItem('pda_chain_timer_size')) || 100; // percent of the original size
     let apiKey = localStorage.getItem('pda_chain_timer_api_key') || '';
     let isPaused = localStorage.getItem('pda_chain_timer_is_paused') === 'true';
 
@@ -133,12 +134,19 @@
         container.style[yType] = yVal + 'px';
     }
 
+    function applySize(percent) {
+        container.style.setProperty('--s', percent / 100);
+    }
+
     applyNativeBounds();
+    applySize(boxSize);
     if (isPaused) container.classList.add('pda-minimized');
 
     const style = document.createElement('style');
     style.innerHTML = `
+        /* --s is the Size setting (1 = 100%); the box's sizes are multiplied by it */
         #pda-chain-timer-container {
+            --s: 1;
             position: fixed;
             background-color: rgba(0, 0, 0, 0.9) !important;
             border: 2px solid #444 !important;
@@ -150,8 +158,8 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            width: 140px;
-            height: 65px;
+            width: calc(140px * var(--s));
+            height: calc(65px * var(--s));
             box-sizing: border-box;
             touch-action: none;
             user-select: none;
@@ -160,8 +168,8 @@
         }
 
         #pda-chain-timer-container.pda-minimized {
-            width: 45px !important;
-            height: 45px !important;
+            width: calc(45px * var(--s)) !important;
+            height: calc(45px * var(--s)) !important;
             border-radius: 50% !important;
             align-items: center;
             justify-content: center;
@@ -169,33 +177,42 @@
         }
 
         #pda-chain-timer-container.pda-minimized > * { display: none !important; }
-        #pda-chain-timer-container.pda-minimized::after { content: '>'; font-size: 20px; font-weight: bold; line-height: 1; }
+        #pda-chain-timer-container.pda-minimized::after { content: '>'; font-size: calc(20px * var(--s)); font-weight: bold; line-height: 1; }
 
-        #pda-timer-header { background: #222 !important; padding: 3px 6px; font-size: 10px; text-transform: uppercase; font-weight: bold; color: #aaa !important; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
-        .pda-timer-controls { display: flex; align-items: center; gap: 4px; }
-        .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: 10px; font-weight: bold; padding: 1px 6px; border-radius: 3px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: 22px; }
+        #pda-timer-header { background: #222 !important; padding: calc(3px * var(--s)) calc(6px * var(--s)); font-size: calc(10px * var(--s)); text-transform: uppercase; font-weight: bold; color: #aaa !important; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
+        .pda-timer-controls { display: flex; align-items: center; gap: calc(4px * var(--s)); }
+        /* Narrower padding so ACK, OPT and MIN fit beside "Chain" in the 140px box */
+        .pda-timer-controls .pda-btn { padding: calc(1px * var(--s)) calc(4px * var(--s)); }
+        .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: calc(10px * var(--s)); font-weight: bold; padding: 1px 6px; border-radius: calc(3px * var(--s)); display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: calc(22px * var(--s)); }
         #pda-timer-ack-btn { background: #b32424 !important; }
         #pda-timer-ack-btn:disabled { opacity: 0.4; cursor: default; }
         #pda-timer-display { position: relative; flex: 1; display: flex; background-color: #111; color: #fff !important; }
-        .pda-timer-half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: 17px; line-height: 1; }
+        .pda-timer-half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
-        .pda-timer-source { position: absolute; left: 0; right: 0; bottom: 1px; text-align: center; font-size: 7px; font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
-        #pda-timer-count { position: absolute; left: 3px; top: 2px; font-size: 7px; font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; }
+        .pda-timer-source { position: absolute; left: 0; right: 0; bottom: calc(1px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
+        #pda-timer-count { position: absolute; left: calc(3px * var(--s)); top: calc(2px * var(--s)); font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; }
         #pda-settings-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 17, 17, 0.95) !important; display: none; flex-direction: column; padding: 4px 8px; z-index: 10; }
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
         .pda-setting-row input[type="checkbox"] { width: auto; margin: 0; }
         .pda-setting-buttons { display: flex; gap: 4px; margin-top: 2px; }
         #pda-settings-close { background: #2a662a !important; flex: 1; }
-        .pda-setting-info { margin-top: 4px; font-size: 8px; line-height: 1.25; color: #999; }
         /* Help scrolls on its own; pan-y overrides the box's touch-action: none so it scrolls on touch */
         #pda-help { display: none; margin-top: 4px; max-height: 160px; overflow-y: auto; touch-action: pan-y; font-size: 8px; line-height: 1.3; color: #999; }
         #pda-help p { margin: 0 0 4px; }
         #pda-help b { color: #ddd; }
-        /* While OPT is open the box grows to fit the panel, which replaces the timers */
-        #pda-chain-timer-container.pda-settings-open { height: auto; }
+        /* While OPT is open the box grows to fit the panel, which replaces the timers, and the
+           panel is drawn at 1.5x size so it's easier to use. Sizes are set directly rather than
+           with zoom/transform, which would also move the box or let it spill off the screen.
+           The panel stays at 1.5x whatever the Size; the box only widens further for the header */
+        #pda-chain-timer-container.pda-settings-open { height: auto; width: calc(140px * max(1.5, var(--s))); }
         .pda-settings-open #pda-timer-display { display: none; }
-        .pda-settings-open #pda-settings-panel { position: static; }
+        .pda-settings-open #pda-settings-panel { position: static; padding: 6px 12px; }
+        .pda-settings-open .pda-setting-row { margin-bottom: 6px; font-size: 14px; }
+        .pda-settings-open .pda-setting-row input { font-size: 14px; padding: 2px 4px; width: 105px; }
+        .pda-settings-open .pda-setting-row input[type="checkbox"] { width: 18px; height: 18px; }
+        .pda-settings-open #pda-settings-panel .pda-btn { font-size: 15px; padding: 3px 9px; min-width: 33px; }
+        .pda-settings-open #pda-help { font-size: 12px; max-height: 240px; }
 
         .timer-warning-active { border-color: #ff2a2a !important; }
         .timer-warning-active #pda-timer-display { animation: pda-timer-flash 0.8s infinite alternate; }
@@ -215,9 +232,9 @@
         <div id="pda-timer-header">
             <span>Chain</span>
             <div class="pda-timer-controls">
-                <button class="pda-btn" id="pda-timer-ack-btn" title="Silence the alarm until the emergency time" style="display: none;">ACK</button>
+                <button class="pda-btn" id="pda-timer-ack-btn" title="Silence the alarm until the panic time" style="display: none;">ACK</button>
                 <button class="pda-btn" id="pda-timer-cfg-btn" title="Settings">OPT</button>
-                <button class="pda-btn" id="pda-timer-pause-btn" title="Pause/Resume">||</button>
+                <button class="pda-btn" id="pda-timer-pause-btn" title="Minimise (turns the alarm off)">MIN</button>
             </div>
         </div>
         <div id="pda-timer-display">
@@ -234,11 +251,11 @@
 
         <div id="pda-settings-panel">
             <div class="pda-setting-row">
-                <span title="Alarm starts here; ACK can silence it">Alert (s):</span>
+                <span title="Alarm starts here; ACK can silence it">Warning (s):</span>
                 <input type="number" id="pda-threshold-input" min="1" max="300">
             </div>
             <div class="pda-setting-row">
-                <span title="Alarm comes back here and can't be silenced">Emergency (s):</span>
+                <span title="Alarm comes back here and can't be silenced">Panic (s):</span>
                 <input type="number" id="pda-critical-input" min="1" max="300">
             </div>
             <div class="pda-setting-row">
@@ -250,16 +267,16 @@
                 <input type="checkbox" id="pda-flash-input">
             </div>
             <div class="pda-setting-row">
+                <span title="Size of the timer box (OPT stays the same size)">Size:</span>
+                <input type="range" id="pda-size-input" min="75" max="200" step="5">
+            </div>
+            <div class="pda-setting-row">
                 <span>Public API:</span>
-                <input type="password" id="pda-api-input" placeholder="key">
+                <input type="text" id="pda-api-input" placeholder="key" autocomplete="off" spellcheck="false">
             </div>
             <div class="pda-setting-buttons">
                 <button class="pda-btn" id="pda-settings-close">Save</button>
                 <button class="pda-btn" id="pda-help-btn" title="Help">?</button>
-            </div>
-            <div class="pda-setting-info">
-                Left timer scrapes page; right timer uses Public API. This is designed to work on
-                PC, mobile (Firefox), PDA. Press the timer for a random inactive target.
             </div>
             <div id="pda-help">
                 <p><b>Left timer</b>: read from the page, no API. <b>Right timer</b>: Torn API.
@@ -274,11 +291,12 @@
                 <b>API-ERR2</b> wrong key (5 = too many calls)<br>
                 <b>API-NET</b> no connection to the API<br>
                 <b>NO KEY</b> no API key set</p>
-                <p><b>Alarm</b>: beeps and flashes from the Alert time. <b>ACK</b> silences it until the
-                Emergency time; after that it can't be silenced. A hit cancels ACK.</p>
-                <p><b>||</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
+                <p><b>Alarm</b>: beeps and flashes from the Warning time. <b>ACK</b> silences it until the
+                Panic time; after that it can't be silenced. A hit cancels ACK.</p>
+                <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
-                <p>After a page load, sound plays only once you've tapped the page. Drag the box to move it.</p>
+                <p>Tap the timers to open the attack page of a random inactive target. Drag the box to move it.</p>
+                <p>After a page load, sound plays only once you've tapped the page.</p>
             </div>
         </div>
     `;
@@ -305,12 +323,14 @@
     const criticalInput = container.querySelector('#pda-critical-input');
     const volumeInput = container.querySelector('#pda-volume-input');
     const flashInput = container.querySelector('#pda-flash-input');
+    const sizeInput = container.querySelector('#pda-size-input');
     const apiInput = container.querySelector('#pda-api-input');
 
     thresholdInput.value = alertThreshold;
     criticalInput.value = criticalThreshold;
     volumeInput.value = volume;
     flashInput.checked = flashEnabled;
+    sizeInput.value = boxSize;
     apiInput.value = apiKey;
 
     function formatSecondsToTimeString(totalSeconds) {
@@ -451,6 +471,8 @@
         localStorage.setItem('pda_chain_timer_volume', volume);
         flashEnabled = flashInput.checked;
         localStorage.setItem('pda_chain_timer_flash', flashEnabled);
+        boxSize = parseInt(sizeInput.value, 10);
+        localStorage.setItem('pda_chain_timer_size', boxSize);
         apiKey = apiInput.value.trim();
         localStorage.setItem('pda_chain_timer_api_key', apiKey);
         settingsPanel.style.display = 'none';
@@ -481,6 +503,9 @@
         localStorage.setItem('pda_chain_timer_ack_end', Date.now() + (alarmSeconds * 1000));
         updateAlarm(alarmSeconds);
     });
+
+    // Size applies while dragging (the header shows it); Save keeps it
+    sizeInput.addEventListener('input', () => applySize(parseInt(sizeInput.value, 10)));
 
     // Test beep at the chosen volume when the slider is released (the tap also unlocks audio)
     volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10)));
@@ -518,8 +543,8 @@
     }
 
     // -------------------------------------------------------------------
-    // Alarm: sounds at or below the alert time unless acknowledged; can't be
-    // acknowledged at or below the emergency time (criticalThreshold). 0 = no alarm (no chain, minimised)
+    // Alarm: sounds at or below the warning time (alertThreshold) unless acknowledged; can't be
+    // acknowledged at or below the panic time (criticalThreshold). 0 = no alarm (no chain, minimised)
     // -------------------------------------------------------------------
     // The acknowledgement is saved as the chain end time it was given for, so it
     // carries across tabs and page loads, and a hit (new end time) cancels it
@@ -707,7 +732,7 @@
             }
         }
 
-        // Minimised means no alarm at all, even below the emergency time
+        // Minimised means no alarm at all, even below the panic time
         if (isPaused || document.hidden) {
             updateAlarm(0);
             return;
