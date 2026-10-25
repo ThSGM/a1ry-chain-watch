@@ -19,7 +19,7 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
   silenced. Both times are set in **OPT**. A hit cancels the acknowledgement.
 - The box and screen edges flash orange while the alarm sounds, then red and faster from the
   panic time. The beep
-  volume, the screen flash and the box size (75-200 %) are set in **OPT**.
+  volume, the screen flash and the box size (75-400 %) are set in **OPT**.
 - Minimised, it gives no alarm at all.
 - Shows the chain count (e.g. `5/10`) in the top-left corner.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.

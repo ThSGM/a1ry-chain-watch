@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.75
+// @version      3.76
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -137,8 +137,11 @@
         container.style[yType] = yVal + 'px';
     }
 
+    // Capped at the largest size whose 140px-wide box still fits the screen with 20px to spare,
+    // so a big Size on a phone stays on screen (e.g. about 250% at 375px wide)
     function applySize(percent) {
-        container.style.setProperty('--s', percent / 100);
+        const fitPercent = Math.floor((window.innerWidth - 20) / 1.4);
+        container.style.setProperty('--s', Math.min(percent, fitPercent) / 100);
     }
 
     applyNativeBounds();
@@ -147,9 +150,11 @@
 
     const style = document.createElement('style');
     style.innerHTML = `
-        /* --s is the Size setting (1 = 100%); the box's sizes are multiplied by it */
+        /* --s is the Size setting (1 = 100%); the box's sizes are multiplied by it. The header
+           (DASH/ACK/OPT/MIN) uses --hs instead: it shrinks with Size but never grows past 100% */
         #pda-chain-timer-container {
             --s: 1;
+            --hs: min(1, var(--s));
             position: fixed;
             background-color: rgba(0, 0, 0, 0.9) !important;
             border: 2px solid #444 !important;
@@ -182,12 +187,12 @@
         #pda-chain-timer-container.pda-minimized > * { display: none !important; }
         #pda-chain-timer-container.pda-minimized::after { content: '>'; font-size: calc(20px * var(--s)); font-weight: bold; line-height: 1; }
 
-        #pda-timer-header { background: #222 !important; padding: calc(3px * var(--s)) calc(4px * var(--s)); font-size: calc(10px * var(--s)); text-transform: uppercase; font-weight: bold; color: #aaa !important; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: calc(3px * var(--s)); }
-        .pda-timer-controls { display: flex; align-items: center; gap: calc(3px * var(--s)); }
+        #pda-timer-header { background: #222 !important; padding: calc(3px * var(--hs)) calc(4px * var(--hs)); font-size: calc(10px * var(--hs)); text-transform: uppercase; font-weight: bold; color: #aaa !important; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: calc(3px * var(--hs)); }
+        .pda-timer-controls { display: flex; align-items: center; gap: calc(3px * var(--hs)); }
         /* Narrower padding so DASH, ACK, OPT and MIN fit in the 140px box */
-        #pda-timer-header .pda-btn { padding: calc(1px * var(--s)) calc(4px * var(--s)); }
+        #pda-timer-header .pda-btn { padding: calc(1px * var(--hs)) calc(4px * var(--hs)); }
         #pda-timer-dash-btn { text-decoration: none; flex-shrink: 0; }
-        .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: calc(10px * var(--s)); font-weight: bold; padding: 1px 6px; border-radius: calc(3px * var(--s)); display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: calc(22px * var(--s)); }
+        .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: calc(10px * var(--hs)); font-weight: bold; padding: 1px 6px; border-radius: calc(3px * var(--hs)); display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: calc(22px * var(--hs)); }
         #pda-timer-ack-btn { background: #b32424 !important; }
         #pda-timer-ack-btn:disabled { opacity: 0.4; cursor: default; }
         #pda-timer-display { position: relative; flex: 1; display: flex; background-color: #111; color: #fff !important; }
@@ -204,27 +209,37 @@
         .pda-setting-block .pda-setting-row { margin-bottom: 1px; }
         .pda-setting-block > input { display: block; box-sizing: border-box; width: 100%; margin: 0; background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; }
         .pda-slider-value { color: #fff; }
+        #pda-api-status { font-size: 9px; margin-top: 2px; color: #999; }
+        #pda-api-status:empty { display: none; }
+        #pda-api-status.pda-api-ok { color: #6c6; }
+        #pda-api-status.pda-api-bad { color: #f66; }
+        /* Slim sliders: thin track, small round thumb (webkit = Chrome/Safari/PDA, moz = Firefox) */
+        .pda-setting-block > input[type="range"] { -webkit-appearance: none; appearance: none; height: 14px; padding: 0; border: none; background: transparent; cursor: pointer; }
+        .pda-setting-block > input[type="range"]::-webkit-slider-runnable-track { height: 3px; background: #555; border-radius: 2px; }
+        .pda-setting-block > input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border-radius: 50%; background: #ddd; border: none; }
+        .pda-setting-block > input[type="range"]::-moz-range-track { height: 3px; background: #555; border-radius: 2px; }
+        .pda-setting-block > input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #ddd; border: none; }
         .pda-setting-buttons { display: flex; gap: 4px; margin-top: 2px; }
         #pda-settings-close { background: #2a662a !important; flex: 1; }
         /* Help scrolls on its own; pan-y overrides the box's touch-action: none so it scrolls on touch */
         #pda-help { display: none; margin-top: 4px; max-height: 160px; overflow-y: auto; touch-action: pan-y; font-size: 8px; line-height: 1.3; color: #999; }
         #pda-help p { margin: 0 0 4px; }
         #pda-help b { color: #ddd; }
-        /* While OPT is open the box grows to fit the panel, which replaces the timers, and the
-           panel is drawn at 1.5x size so it's easier to use. Sizes are set directly rather than
-           with zoom/transform, which would also move the box or let it spill off the screen.
-           The panel stays at 1.5x whatever the Size. 300px wide, but never wider than the
-           screen (phones are often 360-430px) */
-        #pda-chain-timer-container.pda-settings-open { height: auto; width: min(300px, calc(100vw - 20px)); }
+        /* While OPT is open the box grows to fit the panel, which replaces the timers. The panel
+           has its own fixed sizes (not scaled by Size) and is 220px wide, but never wider than the
+           screen. Sizes are set directly rather than with zoom/transform, which would also move
+           the box or let it spill off the screen */
+        #pda-chain-timer-container.pda-settings-open { height: auto; width: min(220px, calc(100vw - 20px)); }
         .pda-settings-open #pda-timer-display { display: none; }
-        .pda-settings-open #pda-settings-panel { position: static; padding: 6px 12px; }
-        .pda-settings-open .pda-setting-row { margin-bottom: 6px; font-size: 14px; }
-        .pda-settings-open .pda-setting-row input { font-size: 14px; padding: 2px 4px; width: 105px; }
-        .pda-settings-open .pda-setting-row input[type="checkbox"] { width: 18px; height: 18px; }
-        .pda-settings-open .pda-setting-block > input { font-size: 14px; padding: 2px 4px; }
-        .pda-settings-open #pda-settings-panel .pda-btn { font-size: 15px; padding: 3px 9px; min-width: 33px; }
-        .pda-settings-open #pda-settings-panel .pda-default-btn { font-size: 12px; padding: 2px 6px; }
-        .pda-settings-open #pda-help { font-size: 12px; max-height: 240px; }
+        .pda-settings-open #pda-settings-panel { position: static; padding: 5px 8px; }
+        .pda-settings-open .pda-setting-row { margin-bottom: 4px; font-size: 11px; }
+        .pda-settings-open .pda-setting-block .pda-setting-row { margin-bottom: 0; }
+        .pda-settings-open .pda-setting-row input[type="checkbox"] { width: 13px; height: 13px; }
+        .pda-settings-open .pda-setting-block > input[type="text"] { font-size: 11px; padding: 2px 4px; }
+        .pda-settings-open #pda-settings-panel .pda-btn { font-size: 11px; padding: 2px 8px; min-width: 24px; }
+        .pda-settings-open #pda-settings-panel .pda-default-btn { font-size: 9px; padding: 1px 5px; }
+        .pda-settings-open #pda-help { font-size: 10px; max-height: 180px; }
+        .pda-settings-open #pda-api-status { font-size: 10px; }
 
         /* Alarm colours: orange from the warning time, red from the panic time. Border rules
            carry the ID so they outrank the base border, which is also !important */
@@ -293,15 +308,19 @@
                     <span title="Size of the timer box (OPT stays the same size)">Size: <b class="pda-slider-value"></b></span>
                     <button class="pda-btn pda-default-btn" data-default="100" title="Default: 100%">Default</button>
                 </div>
-                <input type="range" id="pda-size-input" min="75" max="200" step="5">
+                <input type="range" id="pda-size-input" min="75" max="400" step="5">
             </div>
             <div class="pda-setting-row">
                 <span title="Flash the screen edges while the alarm sounds">Screen flash:</span>
                 <input type="checkbox" id="pda-flash-input">
             </div>
             <div class="pda-setting-block">
-                <div class="pda-setting-row"><span>Public API key:</span></div>
+                <div class="pda-setting-row">
+                    <span>Public API key:</span>
+                    <button class="pda-btn pda-default-btn" id="pda-api-check" title="Try the key in the box with the timer's API call">Check</button>
+                </div>
                 <input type="text" id="pda-api-input" placeholder="key" autocomplete="off" spellcheck="false">
+                <div id="pda-api-status"></div>
             </div>
             <div class="pda-setting-buttons">
                 <button class="pda-btn" id="pda-settings-close">Save</button>
@@ -355,13 +374,24 @@
     const flashInput = container.querySelector('#pda-flash-input');
     const sizeInput = container.querySelector('#pda-size-input');
     const apiInput = container.querySelector('#pda-api-input');
+    const apiCheckBtn = container.querySelector('#pda-api-check');
+    const apiStatus = container.querySelector('#pda-api-status');
 
-    thresholdInput.value = alertThreshold;
-    criticalInput.value = criticalThreshold;
-    volumeInput.value = volume;
-    flashInput.checked = flashEnabled;
-    sizeInput.value = boxSize;
-    apiInput.value = apiKey;
+    // OPT inputs show the saved settings (on load, and when OPT is left without Save)
+    function fillSettingInputs() {
+        thresholdInput.value = alertThreshold;
+        criticalInput.value = criticalThreshold;
+        volumeInput.value = volume;
+        flashInput.checked = flashEnabled;
+        sizeInput.value = boxSize;
+        apiInput.value = apiKey;
+        for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput]) {
+            input.closest('.pda-setting-block').querySelector('.pda-slider-value').textContent = formatSliderValue(input);
+        }
+        applySize(boxSize);
+    }
+
+    fillSettingInputs();
 
     function formatSecondsToTimeString(totalSeconds) {
         if (totalSeconds <= 0) return "--:--";
@@ -499,21 +529,62 @@
         localStorage.setItem('pda_chain_timer_size', boxSize);
         apiKey = apiInput.value.trim();
         localStorage.setItem('pda_chain_timer_api_key', apiKey);
+        closeSettings();
+    });
+
+    function closeSettings() {
         settingsPanel.style.display = 'none';
         helpPanel.style.display = 'none';
+        showApiStatus('', '');
         container.classList.remove('pda-settings-open');
+    }
+
+    // state: 'ok' (green), 'bad' (red) or '' (grey)
+    function showApiStatus(text, state) {
+        apiStatus.textContent = text;
+        apiStatus.className = state ? 'pda-api-' + state : '';
+    }
+
+    // Check: the timer's own API call with the key in the box (saved or not), so a pass
+    // means the right-hand timer will work with it. Torn's error text is shown as is
+    apiCheckBtn.addEventListener('click', () => {
+        const key = apiInput.value.trim();
+        if (!key) { showApiStatus('Enter a key first', 'bad'); return; }
+        showApiStatus('Checking...', '');
+        fetch(`https://api.torn.com/faction/?selections=chain&key=${encodeURIComponent(key)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data && data.chain && typeof data.chain.timeout === 'number') {
+                    showApiStatus(`Key works: chain ${data.chain.current}/${data.chain.max}` + (key === apiKey ? '' : '. Press Save to use it'), 'ok');
+                } else if (data && data.error) {
+                    showApiStatus(`Error ${data.error.code}: ${data.error.error}`, 'bad');
+                } else {
+                    showApiStatus('Unexpected reply from the API', 'bad');
+                }
+            })
+            .catch(() => showApiStatus('No connection to the API', 'bad'));
     });
 
     helpBtn.addEventListener('click', () => {
         helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
     });
 
+    // Minimising closes OPT without saving: while OPT is open the box ignores presses,
+    // so the circle could never be tapped open again
+    function setMinimized(minimized) {
+        isPaused = minimized;
+        container.classList.toggle('pda-minimized', minimized);
+        if (!minimized) return;
+        if (settingsPanel.style.display === 'flex') {
+            closeSettings();
+            fillSettingInputs();
+        }
+        updateAlarm(0);
+    }
+
     function togglePauseMinimize() {
-        isPaused = !isPaused;
+        setMinimized(!isPaused);
         localStorage.setItem('pda_chain_timer_is_paused', isPaused);
-        if (isPaused) container.classList.add('pda-minimized');
-        else container.classList.remove('pda-minimized');
-        if (isPaused) updateAlarm(0);
     }
 
     pauseBtn.addEventListener('click', (e) => {
@@ -540,7 +611,6 @@
     for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput]) {
         const block = input.closest('.pda-setting-block');
         const valueLabel = block.querySelector('.pda-slider-value');
-        valueLabel.textContent = formatSliderValue(input);
         input.addEventListener('input', () => { valueLabel.textContent = formatSliderValue(input); });
         // Default: set the slider as if it were dragged there (so Size and the test beep follow)
         block.querySelector('.pda-default-btn').addEventListener('click', (e) => {
@@ -552,6 +622,8 @@
 
     // Size applies while dragging (the header shows it); Save keeps it
     sizeInput.addEventListener('input', () => applySize(parseInt(sizeInput.value, 10)));
+    // Re-check the screen cap on resize / rotation (the slider holds the saved or previewed size)
+    window.addEventListener('resize', () => applySize(parseInt(sizeInput.value, 10)));
 
     // Test beep at the chosen volume when the slider is released (the tap also unlocks audio)
     volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10)));
@@ -763,11 +835,7 @@
         if (!isDragging) {
             let savedPaused = localStorage.getItem('pda_chain_timer_is_paused') === 'true';
 
-            if (isPaused !== savedPaused) {
-                isPaused = savedPaused;
-                if (isPaused) container.classList.add('pda-minimized');
-                else container.classList.remove('pda-minimized');
-            }
+            if (isPaused !== savedPaused) setMinimized(savedPaused);
 
             let xType = localStorage.getItem('pda_chain_timer_x_type');
             let xVal = localStorage.getItem('pda_chain_timer_x_val');
