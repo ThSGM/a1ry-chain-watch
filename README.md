@@ -10,13 +10,15 @@ It shows two timers side by side, so you can tell straight away if one of them s
   (every 30 s otherwise).
 
 The small grey text under each timer says where the time came from (e.g. `BAR`, `SES`, `API 12s`).
-The codes are listed at the top of the script.
+Tap **?** in **OPT** for what the codes mean; they're also listed at the top of the script.
 
 ## Features
 
 - Flashes and beeps every second when the chain drops to your alert time (default 2:30).
   Tap **ACK** to silence it; from the emergency time (default 1:30) it comes back and can't be
   silenced. Both times are set in **OPT**. A hit cancels the acknowledgement.
+- The screen edges flash red while the alarm sounds, faster from the emergency time. The beep
+  volume and the screen flash are set in **OPT**.
 - Minimised, it gives no alarm at all.
 - Shows the chain count (e.g. `5/10`) in the top-left corner.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.

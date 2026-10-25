@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.70
+// @version      3.71
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -55,6 +55,8 @@
 //   second. ACK silences it until the emergency time (default 1:30); from
 //   there it can't be silenced. The acknowledgement is shared across tabs
 //   and page loads, and a hit cancels it. Minimised (||) = no alarm at all.
+//   OPT also sets the beep volume and the screen-edge flash, which pulses
+//   faster from the emergency time.
 // -------------------------------------------------------------------
 
 (function() {
@@ -72,6 +74,8 @@
     // An acknowledgement whose saved end time is further than this from the current one is
     // from before a hit (hits move it by minutes); the slack covers sources differing by 1-2 s
     const ACK_TOLERANCE = 10000;
+    // Beep gain at 100% volume; the 20% default (0.08) is the volume of the beep before 3.71
+    const MAX_GAIN = 0.4;
 
     if (window.top !== window.self) return;
     if (document.getElementById('pda-chain-timer-container')) return;
@@ -94,6 +98,9 @@
     let criticalThreshold = parseInt(localStorage.getItem('pda_chain_timer_critical_threshold')) || 90;
     localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
     let alarmSeconds = 0;
+    const savedVolume = parseInt(localStorage.getItem('pda_chain_timer_volume'));
+    let volume = isNaN(savedVolume) ? 20 : savedVolume; // percent; 0 is a valid (silent) setting
+    let flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
     let apiKey = localStorage.getItem('pda_chain_timer_api_key') || '';
     let isPaused = localStorage.getItem('pda_chain_timer_is_paused') === 'true';
 
@@ -177,8 +184,14 @@
         #pda-settings-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 17, 17, 0.95) !important; display: none; flex-direction: column; padding: 4px 8px; z-index: 10; }
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
-        #pda-settings-close { background: #2a662a !important; margin-top: 2px; }
+        .pda-setting-row input[type="checkbox"] { width: auto; margin: 0; }
+        .pda-setting-buttons { display: flex; gap: 4px; margin-top: 2px; }
+        #pda-settings-close { background: #2a662a !important; flex: 1; }
         .pda-setting-info { margin-top: 4px; font-size: 8px; line-height: 1.25; color: #999; }
+        /* Help scrolls on its own; pan-y overrides the box's touch-action: none so it scrolls on touch */
+        #pda-help { display: none; margin-top: 4px; max-height: 160px; overflow-y: auto; touch-action: pan-y; font-size: 8px; line-height: 1.3; color: #999; }
+        #pda-help p { margin: 0 0 4px; }
+        #pda-help b { color: #ddd; }
         /* While OPT is open the box grows to fit the panel, which replaces the timers */
         #pda-chain-timer-container.pda-settings-open { height: auto; }
         .pda-settings-open #pda-timer-display { display: none; }
@@ -188,6 +201,13 @@
         .timer-warning-active #pda-timer-display { animation: pda-timer-flash 0.8s infinite alternate; }
         .timer-acknowledged { border-color: #b36b00 !important; }
         @keyframes pda-timer-flash { from { background-color: #111; } to { background-color: #b30000; } }
+
+        /* Screen-edge flash: the glow is drawn once and only its opacity is animated, so the
+           browser doesn't repaint the page. Fast = 2.5 flashes/s, under the 3/s seizure guideline */
+        #pda-chain-flash { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 999998; box-shadow: inset 0 0 40px 12px rgba(255, 0, 0, 0.9); opacity: 0; display: none; }
+        #pda-chain-flash.pda-flash-on { display: block; animation: pda-edge-flash 0.5s infinite alternate; }
+        #pda-chain-flash.pda-flash-fast { animation-duration: 0.2s; }
+        @keyframes pda-edge-flash { from { opacity: 0; } to { opacity: 1; } }
     `;
     document.head.appendChild(style);
 
@@ -222,17 +242,51 @@
                 <input type="number" id="pda-critical-input" min="1" max="300">
             </div>
             <div class="pda-setting-row">
+                <span title="Alarm beep volume; plays a test beep when changed">Volume:</span>
+                <input type="range" id="pda-volume-input" min="0" max="100" step="5">
+            </div>
+            <div class="pda-setting-row">
+                <span title="Flash the screen edges while the alarm sounds">Screen flash:</span>
+                <input type="checkbox" id="pda-flash-input">
+            </div>
+            <div class="pda-setting-row">
                 <span>Public API:</span>
                 <input type="password" id="pda-api-input" placeholder="key">
             </div>
-            <button class="pda-btn" id="pda-settings-close">Save</button>
+            <div class="pda-setting-buttons">
+                <button class="pda-btn" id="pda-settings-close">Save</button>
+                <button class="pda-btn" id="pda-help-btn" title="Help">?</button>
+            </div>
             <div class="pda-setting-info">
                 Left timer scrapes page; right timer uses Public API. This is designed to work on
                 PC, mobile (Firefox), PDA. Press the timer for a random inactive target.
             </div>
+            <div id="pda-help">
+                <p><b>Left timer</b>: read from the page, no API. <b>Right timer</b>: Torn API.
+                If they disagree, one has a problem. The code under each says where the time came from.</p>
+                <p><b>BAR</b> sidebar chain bar<br>
+                <b>ATK</b> attack page header<br>
+                <b>SES</b> Torn's saved sidebar data<br>
+                <b>DOM</b> other chain text on the page<br>
+                <b>MEM-x</b> time saved earlier by a tab (x = where from)<br>
+                <b>NONE</b> no local time found</p>
+                <p><b>API 4s</b> API data, 4 s old<br>
+                <b>API-ERR2</b> wrong key (5 = too many calls)<br>
+                <b>API-NET</b> no connection to the API<br>
+                <b>NO KEY</b> no API key set</p>
+                <p><b>Alarm</b>: beeps and flashes from the Alert time. <b>ACK</b> silences it until the
+                Emergency time; after that it can't be silenced. A hit cancels ACK.</p>
+                <p><b>||</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
+                No alarm while this tab is in the background.</p>
+                <p>After a page load, sound plays only once you've tapped the page. Drag the box to move it.</p>
+            </div>
         </div>
     `;
     document.body.appendChild(container);
+
+    const flashOverlay = document.createElement('div');
+    flashOverlay.id = 'pda-chain-flash';
+    document.body.appendChild(flashOverlay);
 
     const display = container.querySelector('#pda-timer-display');
     const localText = container.querySelector('#pda-timer-text-local');
@@ -245,12 +299,18 @@
     const cfgBtn = container.querySelector('#pda-timer-cfg-btn');
     const settingsPanel = container.querySelector('#pda-settings-panel');
     const closeSettingsBtn = container.querySelector('#pda-settings-close');
+    const helpBtn = container.querySelector('#pda-help-btn');
+    const helpPanel = container.querySelector('#pda-help');
     const thresholdInput = container.querySelector('#pda-threshold-input');
     const criticalInput = container.querySelector('#pda-critical-input');
+    const volumeInput = container.querySelector('#pda-volume-input');
+    const flashInput = container.querySelector('#pda-flash-input');
     const apiInput = container.querySelector('#pda-api-input');
 
     thresholdInput.value = alertThreshold;
     criticalInput.value = criticalThreshold;
+    volumeInput.value = volume;
+    flashInput.checked = flashEnabled;
     apiInput.value = apiKey;
 
     function formatSecondsToTimeString(totalSeconds) {
@@ -387,10 +447,19 @@
             criticalThreshold = val;
             localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
         }
+        volume = parseInt(volumeInput.value, 10);
+        localStorage.setItem('pda_chain_timer_volume', volume);
+        flashEnabled = flashInput.checked;
+        localStorage.setItem('pda_chain_timer_flash', flashEnabled);
         apiKey = apiInput.value.trim();
         localStorage.setItem('pda_chain_timer_api_key', apiKey);
         settingsPanel.style.display = 'none';
+        helpPanel.style.display = 'none';
         container.classList.remove('pda-settings-open');
+    });
+
+    helpBtn.addEventListener('click', () => {
+        helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
     });
 
     function togglePauseMinimize() {
@@ -413,6 +482,9 @@
         updateAlarm(alarmSeconds);
     });
 
+    // Test beep at the chosen volume when the slider is released (the tap also unlocks audio)
+    volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10)));
+
     // Unlock audio on a tap anywhere on the page, so the alarm can sound after a page load
     document.addEventListener('pointerdown', initAudioContext, true);
 
@@ -426,7 +498,9 @@
         } catch(e) { console.error("Audio block:", e); }
     }
 
-    function playQuietAlert() {
+    // percent: volume to play at, 0-100 (default: the saved setting)
+    function playQuietAlert(percent = volume) {
+        if (percent <= 0) return;
         try {
             initAudioContext();
             if (!audioCtx || audioCtx.state === 'suspended') return;
@@ -434,7 +508,7 @@
             const gainNode = audioCtx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(MAX_GAIN * percent / 100, audioCtx.currentTime);
             gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.2);
             osc.connect(gainNode);
             gainNode.connect(audioCtx.destination);
@@ -464,6 +538,8 @@
         container.classList.toggle('timer-acknowledged', inAlert && !sounding);
         ackBtn.style.display = sounding ? '' : 'none';
         ackBtn.disabled = critical;
+        flashOverlay.classList.toggle('pda-flash-on', sounding && flashEnabled);
+        flashOverlay.classList.toggle('pda-flash-fast', critical);
         if (sounding) playQuietAlert();
     }
 
