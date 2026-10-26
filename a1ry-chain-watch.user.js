@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.76
+// @version      3.77
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -66,6 +66,8 @@
     // These are user ID ranges that will be targeted when the timer is tapped
     const minID = 3000000;
     const maxID = 3400000;
+    // User IDs in the range that are never picked
+    const excludedIDs = [3133682];
 
     // API calls are shared across tabs: every 5s during a chain, every 30s otherwise.
     // Torn allows 100 calls a minute per user in total
@@ -501,7 +503,10 @@
 
     // Tap on the timer digits: jump to the attack page of a random player in the ID range
     function openRandomTarget() {
-        const randID = Math.floor(Math.random() * (maxID - minID + 1)) + minID;
+        let randID;
+        do {
+            randID = Math.floor(Math.random() * (maxID - minID + 1)) + minID;
+        } while (excludedIDs.includes(randID));
         window.location.href = `https://www.torn.com/page.php?sid=attack&user2ID=${randID}`;
     }
 
