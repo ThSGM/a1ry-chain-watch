@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.78
+// @version      3.79
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -55,13 +55,13 @@
 // nothing. Chain count (top-left, e.g. 5/10) comes from the API.
 //
 // Alarm (both times set in OPT):
-//   At or below the warning time (default 2:30) it flashes and beeps every
-//   second. ACK silences it until the panic time (default 2:00); from
+//   At or below the warning time (default 2:30) it flashes and sounds. ACK silences it until the panic time (default 2:00); from
 //   there it can't be silenced. The acknowledgement is shared across tabs
 //   and page loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
-//   OPT also sets the beep volume and pattern (Regular, Pulse, Rave, Off;
-//   all made in the browser, no sound files) and the screen-edge flash,
-//   which pulses faster from the panic time.
+//   OPT also sets the volume, the sound (Chime, Hi-lo, Yelp, Alarm clock,
+//   Phone ring, Klaxon, SOS, Warble or Off; all made in the browser, no
+//   sound files) and the screen-edge flash, which pulses faster from the
+//   panic time.
 //
 // Keep screen on (OPT): while a chain is running and the box isn't
 // minimised, the screen is kept from sleeping (Screen Wake Lock, where
@@ -86,22 +86,64 @@
     // An acknowledgement whose saved end time is further than this from the current one is
     // from before a hit (hits move it by minutes); the slack covers sources differing by 1-2 s
     const ACK_TOLERANCE = 10000;
-    // Beep gain at 100% volume; the 20% default (0.08) is the volume of the beep before 3.71
-    const MAX_GAIN = 0.4;
+    // Beep gain at 100% volume. 0.4 until 3.78 was far too loud at the top; 100% is now what
+    // 25% was then, and the 20% default (0.02) a quarter of the old default
+    const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.78';
-    // Beeps played each second while the alarm sounds: [start s, length s, pitch Hz]
-    const BEEP_PATTERNS = {
-        regular: [[0, 0.2, 587.33]],
-        pulse: [[0, 0.1, 587.33], [0.2, 0.1, 587.33]],
-        rave: [[0, 0.12, 587.33], [0.25, 0.12, 880], [0.5, 0.12, 587.33], [0.75, 0.12, 880]],
-        off: []
+    const SCRIPT_VERSION = '3.79';
+    // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
+    // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
+    // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
+    // sound louder, so they get less), env 'pluck' (fades out from the start, the default) or
+    // 'hold' (steady, with a short fade in and out)
+    const ALARM_SOUNDS = {
+        chime: { cycle: 1, notes: [
+            { t: 0, len: 0.6, f: 1046.5 }, { t: 0.15, len: 0.6, f: 1318.5 }, { t: 0.3, len: 0.7, f: 1568 }] },
+        hilo: { cycle: 1, notes: [
+            { t: 0, len: 0.48, f: 950, type: 'triangle', env: 'hold', g: 0.8 },
+            { t: 0.5, len: 0.48, f: 750, type: 'triangle', env: 'hold', g: 0.8 }] },
+        yelp: { cycle: 1, notes: [0, 0.25, 0.5, 0.75].map(t =>
+            ({ t, len: 0.23, f: 700, f2: 1400, type: 'triangle', env: 'hold', g: 0.8 })) },
+        alarmclock: { cycle: 1, notes: [0, 0.12, 0.24, 0.36].map(t =>
+            ({ t, len: 0.07, f: 2000, type: 'square', env: 'hold', g: 0.3 })) },
+        phone: { cycle: 2, notes: [...ringBurst(0, 0.4), ...ringBurst(0.6, 0.4)] },
+        klaxon: { cycle: 2, notes: [
+            { t: 0, len: 0.55, f: 110, f2: 230, type: 'sawtooth', env: 'hold', g: 0.45 },
+            { t: 0.62, len: 0.35, f: 230, f2: 200, type: 'sawtooth', env: 'hold', g: 0.45 }] },
+        sos: { cycle: 4, notes: morseNotes('... --- ...', 0.1, 800) },
+        warble: { cycle: 1, notes: Array.from({ length: 12 }, (_, i) =>
+            ({ t: i * 0.07, len: 0.07, f: i % 2 ? 1100 : 800, env: 'hold' })) },
+        off: { cycle: 1, notes: [] }
     };
+
+    // Old UK phone ring: two tones together, switched on and off 20 times a second
+    function ringBurst(start, length) {
+        const notes = [];
+        for (let t = 0; t < length - 0.01; t += 0.05) {
+            for (const f of [400, 450]) notes.push({ t: start + t, len: 0.025, f, env: 'hold', g: 0.6 });
+        }
+        return notes;
+    }
+
+    // Morse: '.' is one unit, '-' three, a space a gap between letters
+    function morseNotes(code, unit, f) {
+        const notes = [];
+        let t = 0;
+        for (const c of code) {
+            if (c === ' ') { t += unit * 2; continue; }
+            const len = c === '.' ? unit : unit * 3;
+            notes.push({ t, len, f, env: 'hold' });
+            t += len + unit;
+        }
+        return notes;
+    }
 
     if (window.top !== window.self) return;
     if (document.getElementById('pda-chain-timer-container')) return;
 
     let audioCtx = null;
+    let alarmBus = null; // the alarm's sounds go through this, so stopping the alarm cuts them at once
+    let alarmCycleEnd = 0; // audioCtx time when the playing sound's cycle ends
     let apiCallStarted = 0; // when the pending API call started, 0 if none
     let isDragging = false;
     let hasMoved = false;
@@ -126,7 +168,8 @@
     let volume = isNaN(savedVolume) ? 20 : savedVolume; // percent; 0 is a valid (silent) setting
     let flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
     let beepPattern = localStorage.getItem('pda_chain_timer_beep');
-    if (!BEEP_PATTERNS[beepPattern]) beepPattern = 'regular';
+    // Regular, Pulse and Rave (3.78) are gone; they and anything unknown become Chime
+    if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'chime';
     let wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
     let wakeLock = null; // the screen wake lock while held
     let wakeLockPending = false;
@@ -345,11 +388,16 @@
                 <input type="range" id="pda-size-input" min="75" max="400" step="5">
             </div>
             <div class="pda-setting-row">
-                <span title="Beeps each second while the alarm sounds; plays a test when changed">Beep:</span>
+                <span title="Alarm sound; plays a test when changed">Sound:</span>
                 <select id="pda-beep-input">
-                    <option value="regular">Regular</option>
-                    <option value="pulse">Pulse</option>
-                    <option value="rave">Rave</option>
+                    <option value="chime">Chime</option>
+                    <option value="hilo">Hi-lo</option>
+                    <option value="yelp">Yelp</option>
+                    <option value="alarmclock">Alarm clock</option>
+                    <option value="phone">Phone ring</option>
+                    <option value="klaxon">Klaxon</option>
+                    <option value="sos">SOS</option>
+                    <option value="warble">Warble</option>
                     <option value="off">Off</option>
                 </select>
             </div>
@@ -387,9 +435,9 @@
                 <b>API-ERR2</b> wrong key (5 = too many calls)<br>
                 <b>API-NET</b> no connection to the API<br>
                 <b>NO KEY</b> no API key set</p>
-                <p><b>Alarm</b>: beeps and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
+                <p><b>Alarm</b>: sounds and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
                 Panic time; after that it can't be silenced. A hit cancels ACK.
-                <b>Beep</b> picks the sound: Regular (1 beep/s), Pulse (double beep), Rave (two-tone, fast) or Off.</p>
+                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring and Klaxon repeat every 2 s, SOS every 4 s.</p>
                 <p><b>Keep screen on</b> stops the screen sleeping while a chain runs (if the browser allows it).</p>
                 <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
@@ -686,9 +734,11 @@
     // Re-check the screen cap on resize / rotation (the slider holds the saved or previewed size)
     window.addEventListener('resize', () => applySize(parseInt(sizeInput.value, 10)));
 
-    // Test beep at the chosen volume when the slider is released (the tap also unlocks audio)
-    volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10), beepInput.value));
-    beepInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10), beepInput.value));
+    // Test sound at the chosen volume when the slider is released or the sound picked
+    // (the tap also unlocks audio)
+    const playTestSound = () => playSound(beepInput.value, parseInt(volumeInput.value, 10), null);
+    volumeInput.addEventListener('change', playTestSound);
+    beepInput.addEventListener('change', playTestSound);
 
     // Unlock audio on a tap anywhere on the page, so the alarm can sound after a page load
     document.addEventListener('pointerdown', initAudioContext, true);
@@ -703,27 +753,62 @@
         } catch(e) { console.error("Audio block:", e); }
     }
 
-    // One second of the beep pattern. percent: volume to play at, 0-100; pattern: a
-    // BEEP_PATTERNS key (defaults: the saved settings)
-    function playQuietAlert(percent = volume, pattern = beepPattern) {
-        if (percent <= 0) return;
+    // Plays one cycle of an ALARM_SOUNDS sound. percent: volume, 0-100; bus: node to play
+    // into (null: straight to the speakers, for the OPT test). Returns false if audio is locked
+    function playSound(name, percent, bus) {
         try {
             initAudioContext();
-            if (!audioCtx || audioCtx.state === 'suspended') return;
-            for (const [start, length, pitch] of BEEP_PATTERNS[pattern] || []) {
-                const t = audioCtx.currentTime + start;
+            if (!audioCtx || audioCtx.state === 'suspended') return false;
+            if (percent <= 0) return true;
+            const peak = MAX_GAIN * percent / 100;
+            const start = audioCtx.currentTime + 0.02;
+            for (const n of (ALARM_SOUNDS[name] || ALARM_SOUNDS.chime).notes) {
+                const t = start + n.t;
+                const g = peak * (n.g || 1);
                 const osc = audioCtx.createOscillator();
                 const gainNode = audioCtx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(pitch, t);
-                gainNode.gain.setValueAtTime(MAX_GAIN * percent / 100, t);
-                gainNode.gain.exponentialRampToValueAtTime(0.00001, t + length);
+                osc.type = n.type || 'sine';
+                osc.frequency.setValueAtTime(n.f, t);
+                if (n.f2) osc.frequency.exponentialRampToValueAtTime(n.f2, t + n.len);
+                if (n.env === 'hold') {
+                    const fade = Math.min(0.01, n.len / 4);
+                    gainNode.gain.setValueAtTime(0, t);
+                    gainNode.gain.linearRampToValueAtTime(g, t + fade);
+                    gainNode.gain.setValueAtTime(g, t + n.len - fade);
+                    gainNode.gain.linearRampToValueAtTime(0, t + n.len);
+                } else {
+                    gainNode.gain.setValueAtTime(g, t);
+                    gainNode.gain.exponentialRampToValueAtTime(0.00001, t + n.len);
+                }
                 osc.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
+                gainNode.connect(bus || audioCtx.destination);
                 osc.start(t);
-                osc.stop(t + length);
+                osc.stop(t + n.len + 0.02);
             }
-        } catch (e) {}
+            return true;
+        } catch (e) { return false; }
+    }
+
+    // Called every tick while the alarm sounds: starts the sound again once its cycle is
+    // over (the 0.1 s slack covers ticks arriving a little early)
+    function playAlarmSound() {
+        initAudioContext();
+        if (!audioCtx || audioCtx.currentTime < alarmCycleEnd - 0.1) return;
+        if (!alarmBus) {
+            alarmBus = audioCtx.createGain();
+            alarmBus.connect(audioCtx.destination);
+        }
+        if (playSound(beepPattern, volume, alarmBus)) {
+            alarmCycleEnd = audioCtx.currentTime + (ALARM_SOUNDS[beepPattern] || ALARM_SOUNDS.chime).cycle;
+        }
+    }
+
+    // Cuts the alarm sound at once, including notes already queued (e.g. the rest of an SOS)
+    function stopAlarmSound() {
+        if (!alarmBus) return;
+        alarmBus.disconnect();
+        alarmBus = null;
+        alarmCycleEnd = 0;
     }
 
     // Holds the screen wake lock while want is true, releases it otherwise. The browser
@@ -773,7 +858,8 @@
         ackBtn.disabled = critical;
         flashOverlay.classList.toggle('pda-flash-on', sounding && flashEnabled);
         flashOverlay.classList.toggle('pda-flash-fast', critical);
-        if (sounding) playQuietAlert();
+        if (sounding) playAlarmSound();
+        else stopAlarmSound();
     }
 
     function parseTimeStringToSeconds(timeStr) {
