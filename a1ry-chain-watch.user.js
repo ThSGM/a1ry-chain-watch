@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.80
+// @version      3.81
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -69,17 +69,17 @@
 // the browser supports it). The browser drops it while the tab is hidden;
 // it is asked for again when the tab is back.
 //
-// Random targets (tap the timers): a random ID from the range chosen in
-// OPT (3.0M-3.4M, 4.2M-4.55M or both), never one in excludedIDs. With
-// "Block big targets" on, the attack page of a target picked this way shows
-// its maximum health; above BIG_HEALTH it is flagged in purple and the
-// Start fight / Join fight button is greyed out and does nothing (found by
-// its text, as Torn's class names change). As a warning that doesn't need
-// the button, the defender's panel also gets a purple outline and a banner
-// shows at the top of the screen. Only the script's own picks
-// (the same ID, picked in the last PICK_WINDOW) are checked, so attack
-// pages opened any other way are left alone. To attack a blocked target
-// anyway, turn the option off in OPT.
+// Random targets (tap the timers): a random ID from the target range
+// chosen in OPT (3.0M-3.4M, 4.2M-4.55M or both, the default), never one in
+// excludedIDs. If a target picked this way has more maximum health than
+// "Block targets with HP over" in OPT (a slider, 100-2000, default 500,
+// far left = off), its attack page shows a purple banner at the top, the
+// box border and the defender's panel turn purple, and the Start fight /
+// Join fight button is greyed out and does nothing (found by its text, as
+// Torn's class names change). Only the script's own picks (the same ID,
+// picked in the last PICK_WINDOW) are checked, so attack pages opened any
+// other way are left alone. To attack a blocked target anyway, raise that
+// limit or slide it to Off in OPT.
 // -------------------------------------------------------------------
 
 (function() {
@@ -95,8 +95,9 @@
     };
     // User IDs in the ranges that are never picked
     const excludedIDs = [3133682, 3350281, 3134993, 3397129];
-    // A picked target with more maximum health than this is flagged as big
-    const BIG_HEALTH = 500;
+    // Default for "Block targets with HP over" (OPT): a picked target with more maximum health
+    // than this is blocked
+    const DEFAULT_BIG_HEALTH = 500;
     // An attack page is checked only if its target was picked this recently (ms)
     const PICK_WINDOW = 120000;
 
@@ -111,7 +112,7 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.80';
+    const SCRIPT_VERSION = '3.81';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
     // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
     // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
@@ -193,8 +194,11 @@
     if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'chime';
     let wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
     let idRange = localStorage.getItem('pda_chain_timer_id_range');
-    if (!ID_RANGES[idRange]) idRange = 'low';
-    let flagBig = localStorage.getItem('pda_chain_timer_flag_big') !== 'false';
+    if (!ID_RANGES[idRange]) idRange = 'both';
+    // 0 = off. Before 3.81 this was an on/off checkbox (flag_big) with a fixed 500
+    const savedBigHealth = parseInt(localStorage.getItem('pda_chain_timer_big_health'));
+    let bigHealth = !isNaN(savedBigHealth) ? savedBigHealth :
+        localStorage.getItem('pda_chain_timer_flag_big') === 'false' ? 0 : DEFAULT_BIG_HEALTH;
     let wakeLock = null; // the screen wake lock while held
     let wakeLockPending = false;
     let wantWakeLock = false;
@@ -295,9 +299,6 @@
         .pda-timer-half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
         .pda-timer-source { position: absolute; left: 0; right: 0; bottom: calc(1px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
-        #pda-target-flag { display: none; position: absolute; right: calc(3px * var(--s)); top: calc(2px * var(--s)); font-size: calc(7px * var(--s)); font-weight: bold; line-height: 1; padding: calc(1px * var(--s)) calc(2px * var(--s)); border-radius: 2px; color: #999 !important; font-family: Arial, sans-serif; pointer-events: none; }
-        #pda-target-flag.pda-flag-shown { display: block; }
-        #pda-target-flag.pda-flag-big { background: #8a2be2 !important; color: #fff !important; }
         #pda-timer-count { position: absolute; left: calc(3px * var(--s)); top: calc(2px * var(--s)); font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; }
         #pda-settings-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 17, 17, 0.95) !important; display: none; flex-direction: column; padding: 4px 8px; z-index: 10; }
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
@@ -388,7 +389,6 @@
                 <span id="pda-timer-text-local">--:--</span>
                 <span class="pda-timer-source" id="pda-timer-source-local"></span>
                 <span id="pda-timer-count"></span>
-                <span id="pda-target-flag"></span>
             </div>
             <div class="pda-timer-half" id="pda-timer-half-api">
                 <span id="pda-timer-text-api">--:--</span>
@@ -448,16 +448,19 @@
                 <input type="checkbox" id="pda-wake-input">
             </div>
             <div class="pda-setting-row">
-                <span title="ID range for the random target opened by tapping the timers">Targets:</span>
+                <span title="ID range for the random target opened by tapping the timers">Target range:</span>
                 <select id="pda-range-input">
                     <option value="low">3.0M-3.4M</option>
                     <option value="high">4.2M-4.55M</option>
                     <option value="both">Both</option>
                 </select>
             </div>
-            <div class="pda-setting-row">
-                <span title="On the attack page of a random target, show its health; above ${BIG_HEALTH} the fight button is blocked">Block big targets:</span>
-                <input type="checkbox" id="pda-flag-input">
+            <div class="pda-setting-block">
+                <div class="pda-setting-row">
+                    <span title="On the attack page of a random target with more maximum health than this, Start fight is blocked. Far left = off">Block targets with HP over: <b class="pda-slider-value"></b></span>
+                    <button class="pda-btn pda-default-btn" data-default="${DEFAULT_BIG_HEALTH}" title="Default: ${DEFAULT_BIG_HEALTH}">Default</button>
+                </div>
+                <input type="range" id="pda-flag-input" min="50" max="2000" step="50">
             </div>
             <div class="pda-setting-block">
                 <div class="pda-setting-row">
@@ -491,9 +494,9 @@
                 <p><b>Keep screen on</b> stops the screen sleeping while a chain runs (if the browser allows it).</p>
                 <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
-                <p>Tap the timers to open the attack page of a random inactive target, from the <b>Targets</b> ID range.
-                With <b>Block big targets</b> on, its health shows top right; above ${BIG_HEALTH} it turns purple and
-                Start fight is blocked: tap again for another (or turn the option off to attack anyway).
+                <p>Tap the timers to open the attack page of a random inactive target, from the <b>Target range</b>.
+                If it has more health than <b>Block targets with HP over</b>, it gets a purple banner and
+                Start fight is blocked: tap again for another (or raise the limit, or slide it to Off, to attack anyway).
                 Attack pages you open yourself aren't checked. Drag the box to move it.
                 <b>DASH</b> opens the dashboard in a new tab.</p>
                 <p>After a page load, sound plays only once you've tapped the page.</p>
@@ -531,7 +534,6 @@
     const wakeInput = container.querySelector('#pda-wake-input');
     const rangeInput = container.querySelector('#pda-range-input');
     const flagInput = container.querySelector('#pda-flag-input');
-    const targetFlag = container.querySelector('#pda-target-flag');
     const sizeInput = container.querySelector('#pda-size-input');
     const apiInput = container.querySelector('#pda-api-input');
     const apiCheckBtn = container.querySelector('#pda-api-check');
@@ -546,10 +548,10 @@
         beepInput.value = beepPattern;
         wakeInput.checked = wakeEnabled;
         rangeInput.value = idRange;
-        flagInput.checked = flagBig;
+        flagInput.value = bigHealth || 50; // 50, the far left, shows as Off
         sizeInput.value = boxSize;
         apiInput.value = apiKey;
-        for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput]) {
+        for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput, flagInput]) {
             input.closest('.pda-setting-block').querySelector('.pda-slider-value').textContent = formatSliderValue(input);
         }
         applySize(boxSize);
@@ -722,10 +724,10 @@
     }
     const pickedTargetID = scriptPickOnLoad();
 
-    // The picked target's maximum health while on its attack page with the option on, else
+    // The picked target's maximum health while on its attack page with blocking on, else
     // null (any other page, including one Torn reaches without a reload)
     function pickedTargetHealth() {
-        if (pickedTargetID === null || !flagBig) return null;
+        if (pickedTargetID === null || !bigHealth) return null;
         const params = new URLSearchParams(location.search);
         const onPick = params.get('sid') === 'attack' && params.get('user2ID') === pickedTargetID;
         return onPick ? readDefenderMaxHealth() : null;
@@ -739,16 +741,13 @@
     // Whether Torn's page currently carries our marks (defender outline, blocked button)
     let pageMarked = false;
 
-    // Shows the picked target's maximum health, and above BIG_HEALTH flags it purple, outlines
-    // the defender and greys out the fight button. Checked every tick, as Torn redraws the page
+    // Above bigHealth: a banner with the picked target's maximum health, purple box border and
+    // defender outline, and the fight button greyed out. Checked every tick, as Torn redraws the page
     // (a redrawn button or panel is a new element without the mark); marks are only written
     // where missing
     function updateTargetFlag() {
         const health = pickedTargetHealth();
-        const big = health !== null && health > BIG_HEALTH;
-        setText(targetFlag, health !== null ? `HP ${health.toLocaleString()}` : '');
-        targetFlag.classList.toggle('pda-flag-shown', health !== null);
-        targetFlag.classList.toggle('pda-flag-big', big);
+        const big = health !== null && health > bigHealth;
         container.classList.toggle('pda-target-big', big);
         setText(bigBanner, big ? `BIG TARGET: HP ${health.toLocaleString()}, don't attack` : '');
         bigBanner.classList.toggle('pda-flag-shown', big);
@@ -764,7 +763,7 @@
             if (big && isFightButton(button)) {
                 if (blocked) continue;
                 button.setAttribute('data-a1ry-blocked', '');
-                button.title = `Blocked by a1ry Chain Watch: max health ${health.toLocaleString()} is over ${BIG_HEALTH}`;
+                button.title = `Blocked by a1ry Chain Watch: max health ${health.toLocaleString()} is over ${bigHealth}`;
             } else if (blocked) {
                 button.removeAttribute('data-a1ry-blocked');
                 button.removeAttribute('title');
@@ -780,7 +779,7 @@
         const button = e.type === 'submit' ? e.submitter : e.target.closest && e.target.closest('button');
         if (!button || !isFightButton(button)) return;
         const health = pickedTargetHealth();
-        if (health === null || health <= BIG_HEALTH) return;
+        if (health === null || health <= bigHealth) return;
         e.preventDefault();
         e.stopImmediatePropagation();
     }
@@ -813,8 +812,10 @@
         localStorage.setItem('pda_chain_timer_wake', wakeEnabled);
         idRange = rangeInput.value;
         localStorage.setItem('pda_chain_timer_id_range', idRange);
-        flagBig = flagInput.checked;
-        localStorage.setItem('pda_chain_timer_flag_big', flagBig);
+        // The far left of the slider (below 100) turns the block off
+        const blockAt = parseInt(flagInput.value, 10);
+        bigHealth = blockAt < 100 ? 0 : blockAt;
+        localStorage.setItem('pda_chain_timer_big_health', bigHealth);
         boxSize = parseInt(sizeInput.value, 10);
         localStorage.setItem('pda_chain_timer_size', boxSize);
         apiKey = apiInput.value.trim();
@@ -889,16 +890,18 @@
         updateAlarm(alarmSeconds);
     });
 
-    // Slider value shown next to each label: times as M:SS (0 = Off), the rest in percent
+    // Slider value shown next to each label: times as M:SS (0 = Off), health as a number (below
+    // 100 = Off), the rest in percent
     function formatSliderValue(input) {
         const v = parseInt(input.value, 10);
         if (input === thresholdInput || input === criticalInput) {
             return v ? `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}` : 'Off';
         }
+        if (input === flagInput) return v < 100 ? 'Off' : v.toLocaleString();
         return v + '%';
     }
 
-    for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput]) {
+    for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput, flagInput]) {
         const block = input.closest('.pda-setting-block');
         const valueLabel = block.querySelector('.pda-slider-value');
         input.addEventListener('input', () => { valueLabel.textContent = formatSliderValue(input); });
