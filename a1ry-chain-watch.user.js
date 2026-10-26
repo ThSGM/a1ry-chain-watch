@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.77
+// @version      3.78
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -26,9 +26,13 @@
 // LEFT source priority (checked every 1s, first match wins):
 //
 //   1. BAR      Sidebar chain bar time       a[class*="chainBar___"] (or old
-//               chain-bar___), the element inside it whose text is M:SS.
-//               Desktop width only: the mobile bar shows just the count.
-//   2. ATK      Attack page header "(M:SS)"  [class*="labelTitle___"]
+//               chain-bar___): its barTimeLeft___ (or old bar-timeleft___)
+//               element, else any element inside it whose text is M:SS or
+//               (M:SS). Desktop width only: the mobile bar shows just the count.
+//      COOL     The chain bar is in cooldown (its progress bar has a
+//               cooldown___ class): no chain, so the cooldown time is ignored
+//   2. ATK      Attack page header "<hits> (M:SS)" in [class*="labelTitle___"],
+//               only on the attack page (sid=attack in the address)
 //   3. SES      Torn's own sidebar data in sessionStorage "sidebarData<userID>",
 //               chain.timestampToUpdate (end time, Unix seconds). Works on
 //               desktop, mobile and PDA; 0 means no chain. Goes stale on pages
@@ -55,8 +59,14 @@
 //   second. ACK silences it until the panic time (default 2:00); from
 //   there it can't be silenced. The acknowledgement is shared across tabs
 //   and page loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
-//   OPT also sets the beep volume and the screen-edge flash, which pulses
-//   faster from the panic time.
+//   OPT also sets the beep volume and pattern (Regular, Pulse, Rave, Off;
+//   all made in the browser, no sound files) and the screen-edge flash,
+//   which pulses faster from the panic time.
+//
+// Keep screen on (OPT): while a chain is running and the box isn't
+// minimised, the screen is kept from sleeping (Screen Wake Lock, where
+// the browser supports it). The browser drops it while the tab is hidden;
+// it is asked for again when the tab is back.
 // -------------------------------------------------------------------
 
 (function() {
@@ -78,6 +88,15 @@
     const ACK_TOLERANCE = 10000;
     // Beep gain at 100% volume; the 20% default (0.08) is the volume of the beep before 3.71
     const MAX_GAIN = 0.4;
+    // Keep in step with @version above (GM_info isn't available in every userscript host)
+    const SCRIPT_VERSION = '3.78';
+    // Beeps played each second while the alarm sounds: [start s, length s, pitch Hz]
+    const BEEP_PATTERNS = {
+        regular: [[0, 0.2, 587.33]],
+        pulse: [[0, 0.1, 587.33], [0.2, 0.1, 587.33]],
+        rave: [[0, 0.12, 587.33], [0.25, 0.12, 880], [0.5, 0.12, 587.33], [0.75, 0.12, 880]],
+        off: []
+    };
 
     if (window.top !== window.self) return;
     if (document.getElementById('pda-chain-timer-container')) return;
@@ -106,6 +125,12 @@
     const savedVolume = parseInt(localStorage.getItem('pda_chain_timer_volume'));
     let volume = isNaN(savedVolume) ? 20 : savedVolume; // percent; 0 is a valid (silent) setting
     let flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
+    let beepPattern = localStorage.getItem('pda_chain_timer_beep');
+    if (!BEEP_PATTERNS[beepPattern]) beepPattern = 'regular';
+    let wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
+    let wakeLock = null; // the screen wake lock while held
+    let wakeLockPending = false;
+    let wantWakeLock = false;
     let boxSize = parseInt(localStorage.getItem('pda_chain_timer_size')) || 100; // percent of the original size
     let apiKey = localStorage.getItem('pda_chain_timer_api_key') || '';
     let isPaused = localStorage.getItem('pda_chain_timer_is_paused') === 'true';
@@ -194,6 +219,8 @@
         /* Narrower padding so DASH, ACK, OPT and MIN fit in the 140px box */
         #pda-timer-header .pda-btn { padding: calc(1px * var(--hs)) calc(4px * var(--hs)); }
         #pda-timer-dash-btn { text-decoration: none; flex-shrink: 0; }
+        .pda-timer-left { display: flex; align-items: center; gap: calc(3px * var(--hs)); min-width: 0; }
+        #pda-timer-version { font-size: calc(7px * var(--hs)); font-weight: normal; text-transform: none; color: #777 !important; white-space: nowrap; overflow: hidden; }
         .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: calc(10px * var(--hs)); font-weight: bold; padding: 1px 6px; border-radius: calc(3px * var(--hs)); display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: calc(22px * var(--hs)); }
         #pda-timer-ack-btn { background: #b32424 !important; }
         #pda-timer-ack-btn:disabled { opacity: 0.4; cursor: default; }
@@ -206,6 +233,7 @@
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
         .pda-setting-row input[type="checkbox"] { width: auto; margin: 0; }
+        .pda-setting-row select { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 0 2px; }
         /* Slider / API blocks: a label row, then the input on its own full-width line */
         .pda-setting-block { margin-bottom: 4px; }
         .pda-setting-block .pda-setting-row { margin-bottom: 1px; }
@@ -237,6 +265,7 @@
         .pda-settings-open .pda-setting-row { margin-bottom: 4px; font-size: 11px; }
         .pda-settings-open .pda-setting-block .pda-setting-row { margin-bottom: 0; }
         .pda-settings-open .pda-setting-row input[type="checkbox"] { width: 13px; height: 13px; }
+        .pda-settings-open .pda-setting-row select { font-size: 11px; }
         .pda-settings-open .pda-setting-block > input[type="text"] { font-size: 11px; padding: 2px 4px; }
         .pda-settings-open #pda-settings-panel .pda-btn { font-size: 11px; padding: 2px 8px; min-width: 24px; }
         .pda-settings-open #pda-settings-panel .pda-default-btn { font-size: 9px; padding: 1px 5px; }
@@ -264,7 +293,10 @@
 
     container.innerHTML = `
         <div id="pda-timer-header">
-            <a class="pda-btn" id="pda-timer-dash-btn" href="https://naughtybot.unifiedbot.net/" target="_blank" rel="noopener" title="Open the dashboard in a new tab">DASH</a>
+            <div class="pda-timer-left">
+                <a class="pda-btn" id="pda-timer-dash-btn" href="https://naughtybot.unifiedbot.net/" target="_blank" rel="noopener" title="Open the dashboard in a new tab">DASH</a>
+                <span id="pda-timer-version">v${SCRIPT_VERSION}</span>
+            </div>
             <div class="pda-timer-controls">
                 <button class="pda-btn" id="pda-timer-ack-btn" title="Silence the alarm until the panic time" style="display: none;">ACK</button>
                 <button class="pda-btn" id="pda-timer-cfg-btn" title="Settings">OPT</button>
@@ -313,8 +345,21 @@
                 <input type="range" id="pda-size-input" min="75" max="400" step="5">
             </div>
             <div class="pda-setting-row">
+                <span title="Beeps each second while the alarm sounds; plays a test when changed">Beep:</span>
+                <select id="pda-beep-input">
+                    <option value="regular">Regular</option>
+                    <option value="pulse">Pulse</option>
+                    <option value="rave">Rave</option>
+                    <option value="off">Off</option>
+                </select>
+            </div>
+            <div class="pda-setting-row">
                 <span title="Flash the screen edges while the alarm sounds">Screen flash:</span>
                 <input type="checkbox" id="pda-flash-input">
+            </div>
+            <div class="pda-setting-row">
+                <span title="Stop the screen from sleeping while a chain is running">Keep screen on:</span>
+                <input type="checkbox" id="pda-wake-input">
             </div>
             <div class="pda-setting-block">
                 <div class="pda-setting-row">
@@ -332,6 +377,7 @@
                 <p><b>Left timer</b>: read from the page, no API. <b>Right timer</b>: Torn API.
                 If they disagree, one has a problem. The code under each says where the time came from.</p>
                 <p><b>BAR</b> sidebar chain bar<br>
+                <b>COOL</b> chain bar in cooldown (no chain)<br>
                 <b>ATK</b> attack page header<br>
                 <b>SES</b> Torn's saved sidebar data<br>
                 <b>DOM</b> other chain text on the page<br>
@@ -342,7 +388,9 @@
                 <b>API-NET</b> no connection to the API<br>
                 <b>NO KEY</b> no API key set</p>
                 <p><b>Alarm</b>: beeps and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
-                Panic time; after that it can't be silenced. A hit cancels ACK.</p>
+                Panic time; after that it can't be silenced. A hit cancels ACK.
+                <b>Beep</b> picks the sound: Regular (1 beep/s), Pulse (double beep), Rave (two-tone, fast) or Off.</p>
+                <p><b>Keep screen on</b> stops the screen sleeping while a chain runs (if the browser allows it).</p>
                 <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
                 <p>Tap the timers to open the attack page of a random inactive target. Drag the box to move it.
@@ -374,6 +422,8 @@
     const criticalInput = container.querySelector('#pda-critical-input');
     const volumeInput = container.querySelector('#pda-volume-input');
     const flashInput = container.querySelector('#pda-flash-input');
+    const beepInput = container.querySelector('#pda-beep-input');
+    const wakeInput = container.querySelector('#pda-wake-input');
     const sizeInput = container.querySelector('#pda-size-input');
     const apiInput = container.querySelector('#pda-api-input');
     const apiCheckBtn = container.querySelector('#pda-api-check');
@@ -385,6 +435,8 @@
         criticalInput.value = criticalThreshold;
         volumeInput.value = volume;
         flashInput.checked = flashEnabled;
+        beepInput.value = beepPattern;
+        wakeInput.checked = wakeEnabled;
         sizeInput.value = boxSize;
         apiInput.value = apiKey;
         for (const input of [thresholdInput, criticalInput, volumeInput, sizeInput]) {
@@ -530,6 +582,10 @@
         localStorage.setItem('pda_chain_timer_volume', volume);
         flashEnabled = flashInput.checked;
         localStorage.setItem('pda_chain_timer_flash', flashEnabled);
+        beepPattern = beepInput.value;
+        localStorage.setItem('pda_chain_timer_beep', beepPattern);
+        wakeEnabled = wakeInput.checked;
+        localStorage.setItem('pda_chain_timer_wake', wakeEnabled);
         boxSize = parseInt(sizeInput.value, 10);
         localStorage.setItem('pda_chain_timer_size', boxSize);
         apiKey = apiInput.value.trim();
@@ -631,7 +687,8 @@
     window.addEventListener('resize', () => applySize(parseInt(sizeInput.value, 10)));
 
     // Test beep at the chosen volume when the slider is released (the tap also unlocks audio)
-    volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10)));
+    volumeInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10), beepInput.value));
+    beepInput.addEventListener('change', () => playQuietAlert(parseInt(volumeInput.value, 10), beepInput.value));
 
     // Unlock audio on a tap anywhere on the page, so the alarm can sound after a page load
     document.addEventListener('pointerdown', initAudioContext, true);
@@ -646,23 +703,50 @@
         } catch(e) { console.error("Audio block:", e); }
     }
 
-    // percent: volume to play at, 0-100 (default: the saved setting)
-    function playQuietAlert(percent = volume) {
+    // One second of the beep pattern. percent: volume to play at, 0-100; pattern: a
+    // BEEP_PATTERNS key (defaults: the saved settings)
+    function playQuietAlert(percent = volume, pattern = beepPattern) {
         if (percent <= 0) return;
         try {
             initAudioContext();
             if (!audioCtx || audioCtx.state === 'suspended') return;
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(MAX_GAIN * percent / 100, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.2);
-            osc.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.2);
+            for (const [start, length, pitch] of BEEP_PATTERNS[pattern] || []) {
+                const t = audioCtx.currentTime + start;
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(pitch, t);
+                gainNode.gain.setValueAtTime(MAX_GAIN * percent / 100, t);
+                gainNode.gain.exponentialRampToValueAtTime(0.00001, t + length);
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                osc.start(t);
+                osc.stop(t + length);
+            }
         } catch (e) {}
+    }
+
+    // Holds the screen wake lock while want is true, releases it otherwise. The browser
+    // releases it by itself when the tab is hidden; the next call with want asks again
+    function updateWakeLock(want) {
+        wantWakeLock = want;
+        if (!navigator.wakeLock) return;
+        if (want && !wakeLock && !wakeLockPending) {
+            wakeLockPending = true;
+            navigator.wakeLock.request('screen')
+                .then(lock => {
+                    wakeLock = lock;
+                    lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+                    // No longer wanted while the request was pending
+                    if (!wantWakeLock) { wakeLock = null; lock.release(); }
+                })
+                .catch(() => {})
+                .finally(() => { wakeLockPending = false; });
+        } else if (!want && wakeLock) {
+            const lock = wakeLock;
+            wakeLock = null;
+            lock.release().catch(() => {});
+        }
     }
 
     // -------------------------------------------------------------------
@@ -723,23 +807,41 @@
         let seconds = -1;
         let src = '';
 
-        // Priority 1: Sidebar chain bar. Torn renamed chain-bar___ to chainBar___, so accept both,
-        // then take the element inside it whose whole text is a time (00:00 when no chain)
+        // Priority 1: Sidebar chain bar. Torn renamed chain-bar___ to chainBar___ (and
+        // bar-timeleft___ to barTimeLeft___), so accept both. The time element by name first; if
+        // that is renamed again, any element inside the bar whose whole text is a time, with or
+        // without brackets (00:00 when no chain)
         const chainBar = document.querySelector('a[class*="chainBar___"], a[class*="chain-bar___"]');
-        if (chainBar) {
-            for (const el of chainBar.querySelectorAll('*')) {
-                if (el.children.length) continue;
-                const match = el.textContent.trim().match(/^(0?[0-5]:[0-5]\d)$/);
-                if (match) { seconds = parseTimeStringToSeconds(match[1]); src = 'BAR'; break; }
+        // In cooldown the bar counts down the cooldown, not a chain: no chain, so stop here
+        // rather than let the cooldown time (or SES/DOM) be read as a chain time
+        const progress = chainBar && chainBar.querySelector('[class*="progress___"]');
+        if (progress && Array.from(progress.classList).some(name => name.startsWith('cooldown___'))) {
+            seconds = 0;
+            src = 'COOL';
+        } else if (chainBar) {
+            const timeLeft = chainBar.querySelector('[class*="barTimeLeft___"], [class*="bar-timeleft___"]');
+            // Standalone M:SS only, as in the DOM fallback below
+            const match = timeLeft && timeLeft.textContent.match(/(?:^|[^\d:])(0?[0-5]:[0-5]\d)(?![\d:])/);
+            if (match) {
+                seconds = parseTimeStringToSeconds(match[1]);
+                src = 'BAR';
+            } else {
+                for (const el of chainBar.querySelectorAll('*')) {
+                    if (el.children.length) continue;
+                    const leafMatch = el.textContent.trim().match(/^\(?(0?[0-5]:[0-5]\d)\)?$/);
+                    if (leafMatch) { seconds = parseTimeStringToSeconds(leafMatch[1]); src = 'BAR'; break; }
+                }
             }
         }
 
         // Priority 2: Attack page header. Checked before SES because the attack page has no
-        // sidebar, so Torn stops refreshing sidebarData there and SES goes stale
-        if (seconds < 0) {
+        // sidebar, so Torn stops refreshing sidebarData there and SES goes stale. Only on the
+        // attack page, and only as "<hits> (M:SS)": labelTitle___ is a generic class other pages
+        // use too, and without the sidebar (mobile, PDA) this runs on every page
+        if (seconds < 0 && new URLSearchParams(location.search).get('sid') === 'attack') {
             const attackTimerContainers = document.querySelectorAll('[class*="labelTitle___"]');
             for (const item of attackTimerContainers) {
-                const match = item.textContent.match(/\((\d{1,2}:\d{2})\)/);
+                const match = item.textContent.replace(/,/g, '').match(/\d+\s*\(\s*(0?[0-5]:[0-5]\d)\s*\)/);
                 if (match) { seconds = parseTimeStringToSeconds(match[1]); src = 'ATK'; break; }
             }
         }
@@ -855,6 +957,7 @@
         // Minimised means no alarm at all, even below the panic time
         if (isPaused || document.hidden) {
             updateAlarm(0);
+            updateWakeLock(false);
             return;
         }
 
@@ -864,6 +967,7 @@
 
         // Alert follows the local timer; the API is the backup when the local one has nothing
         updateAlarm(localSeconds > 0 ? localSeconds : apiSeconds);
+        updateWakeLock(wakeEnabled && (localSeconds > 0 || apiSeconds > 0));
 
     }, 1000);
 })();
