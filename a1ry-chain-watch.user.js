@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.82
+// @version      3.83
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -115,7 +115,9 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.82';
+    const SCRIPT_VERSION = '3.83';
+    // OPT's Update button: a userscript manager offers to install what's here
+    const UPDATE_URL = 'https://update.greasyfork.org/scripts/601300/a1ry%20Chain%20Watch.user.js';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
     // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
     // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
@@ -139,12 +141,13 @@
         warble: { cycle: 1, notes: Array.from({ length: 12 }, (_, i) =>
             ({ t: i * 0.07, len: 0.07, f: i % 2 ? 1100 : 800, env: 'hold' })) },
         // The CTU phone in 24, measured from a recording: 2+2 quiet pips at 697 Hz, 4 loud at
-        // 991 Hz, then 8 an octave down at 493 Hz, each about 33 ms on, 20 ms off
+        // 991 Hz, then 8 an octave down at 493 Hz, each about 33 ms on, 20 ms off. Twice the
+        // recording's level: pips this short sound softer than the other sounds at the same level
         ctu: { cycle: 2, notes: [
-            ...pips([0, 0.052, 0.221, 0.271], 0.03, 697, [[1, 0.21], [3, 0.47], [5, 0.08]]),
-            ...pips([0.66, 0.708, 0.762, 0.817], 0.033, 991, [[1, 0.8], [3, 0.4]]),
+            ...pips([0, 0.052, 0.221, 0.271], 0.03, 697, [[1, 0.42], [3, 0.94], [5, 0.16]]),
+            ...pips([0.66, 0.708, 0.762, 0.817], 0.033, 991, [[1, 1.6], [3, 0.8]]),
             ...pips(Array.from({ length: 8 }, (_, i) => 0.872 + i * 0.0546), 0.035, 493,
-                [[1, 0.35], [3, 0.35], [5, 0.35]])] },
+                [[1, 0.7], [3, 0.7], [5, 0.7]])] },
         off: { cycle: 1, notes: [] }
     };
 
@@ -313,6 +316,7 @@
         /* Narrower padding so DASH, ACK, OPT and MIN fit in the 140px box */
         #pda-timer-header .pda-btn { padding: calc(1px * var(--hs)) calc(4px * var(--hs)); }
         #pda-timer-dash-btn { text-decoration: none; flex-shrink: 0; }
+        #pda-update-btn { text-decoration: none; }
         .pda-timer-left { display: flex; align-items: center; gap: calc(3px * var(--hs)); min-width: 0; }
         #pda-timer-version { font-size: calc(7px * var(--hs)); font-weight: normal; text-transform: none; color: #777 !important; white-space: nowrap; overflow: hidden; }
         .pda-btn { background: #444 !important; border: none !important; color: #fff !important; font-size: calc(10px * var(--hs)); font-weight: bold; padding: 1px 6px; border-radius: calc(3px * var(--hs)); display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: Arial, sans-serif; min-width: calc(22px * var(--hs)); }
@@ -497,6 +501,7 @@
             <div class="pda-setting-buttons">
                 <button class="pda-btn" id="pda-settings-close">Save</button>
                 <button class="pda-btn" id="pda-help-btn" title="Help">?</button>
+                <a class="pda-btn" id="pda-update-btn" href="${UPDATE_URL}" target="_blank" rel="noopener" title="Install the latest version from Greasy Fork">Update</a>
             </div>
             <div id="pda-help">
                 <p><b>Left timer</b>: read from the page, no API. <b>Right timer</b>: Torn API.
@@ -525,6 +530,8 @@
                 Attack pages you open yourself aren't checked. Drag the box to move it.
                 <b>DASH</b> opens the dashboard in a new tab.</p>
                 <p>After a page load, sound plays only once you've tapped the page.</p>
+                <p><b>Update</b> opens the latest version on Greasy Fork; Tampermonkey or Violentmonkey then
+                offers to install it. In TornPDA, update it in the app's userscript settings instead.</p>
             </div>
         </div>
     `;
