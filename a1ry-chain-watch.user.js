@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.85
+// @version      3.86
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -61,8 +61,7 @@
 //   warning time or with the warning Off. The acknowledgement is shared across tabs and page
 //   loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
 //   OPT also sets the volume, the sound (Chime, Hi-lo, Yelp, Alarm clock,
-//   Phone ring, Klaxon, SOS, Warble, 24 phone, FF7 battle, FF6 boss, Sonic drowning (speeds up as
-//   the chain runs down) or Off; all made in the browser, no
+//   Phone ring, Klaxon, SOS, 24 phone, FF7 battle, FF6 battle or Off; all made in the browser, no
 //   sound files) and the screen-edge flash, which pulses faster from the
 //   panic time.
 //
@@ -116,15 +115,14 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.85';
+    const SCRIPT_VERSION = '3.86';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
     // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
     // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
     // sound louder, so they get less), env 'pluck' (fades out from the start, the default) or
-    // 'hold' (steady, with a short fade in and out). notes can also be a function of the
-    // seconds left that returns them, for a sound that changes as the chain runs down
+    // 'hold' (steady, with a short fade in and out)
     const ALARM_SOUNDS = {
         chime: { cycle: 1, notes: [
             { t: 0, len: 0.6, f: 1046.5 }, { t: 0.15, len: 0.6, f: 1318.5 }, { t: 0.3, len: 0.7, f: 1568 }] },
@@ -140,8 +138,6 @@
             { t: 0, len: 0.55, f: 110, f2: 230, type: 'sawtooth', env: 'hold', g: 0.45 },
             { t: 0.62, len: 0.35, f: 230, f2: 200, type: 'sawtooth', env: 'hold', g: 0.45 }] },
         sos: { cycle: 4, notes: morseNotes('... --- ...', 0.1, 800) },
-        warble: { cycle: 1, notes: Array.from({ length: 12 }, (_, i) =>
-            ({ t: i * 0.07, len: 0.07, f: i % 2 ? 1100 : 800, env: 'hold' })) },
         // The CTU phone in 24, measured from a recording: 2+2 quiet pips at 697 Hz, 4 loud at
         // 991 Hz, then 8 an octave down at 493 Hz, each about 33 ms on, 20 ms off. Twice the
         // recording's level: pips this short sound softer than the other sounds at the same level
@@ -150,39 +146,6 @@
             ...pips([0.66, 0.708, 0.762, 0.817], 0.033, 991, [[1, 1.6], [3, 0.8]]),
             ...pips(Array.from({ length: 8 }, (_, i) => 0.872 + i * 0.0546), 0.035, 493,
                 [[1, 0.7], [3, 0.7], [5, 0.7]])] },
-        // Sonic's drowning countdown, from a MIDI of it: notes in pairs, C4 then C5 (over a bass
-        // two octaves down, with a kick and a tick), two pairs on C then two on C#. It speeds up
-        // as the chain runs down, from a note every 0.2 s at the warning time (the game's start)
-        // to every 0.1 s at the end, with the game's fast C/C# trill over the last fifth. Each
-        // call returns the next second, carrying on where the last one stopped, so the pattern
-        // runs on unbroken
-        drown: { cycle: 1, notes: (() => {
-            let step = 0; // notes played so far
-            let next = 0; // when the next note is due, s into this second
-            return seconds => {
-                const top = Math.max(alertThreshold, criticalThreshold) || 150;
-                const urgency = Math.min(1, Math.max(0, 1 - seconds / top)); // 0 calm, 1 frantic
-                const gap = 0.2 - 0.1 * urgency;
-                const notes = [];
-                for (; next < 1; next += gap, step++) {
-                    const t = next;
-                    const high = step % 2 === 1;
-                    const f = (Math.floor(step / 4) % 2 ? 277.18 : 261.63) * (high ? 2 : 1);
-                    const len = Math.min(0.09, gap * 0.9);
-                    notes.push({ t, len, f, type: 'square', env: 'hold', g: 1 },
-                        { t, len, f: f / 4, type: 'triangle', env: 'hold', g: 1.5 },
-                        high ? { t, len: 0.025, f: 5000, type: 'square', g: 0.2 } // tick
-                            : { t, len: 0.12, f: 160, f2: 45, g: 1.5 }); // kick
-                    if (urgency > 0.8) {
-                        for (const [dt, tf] of [[0, 523.25], [gap / 2, 554.37]]) {
-                            notes.push({ t: t + dt, len: gap * 0.45, f: tf, type: 'square', env: 'hold', g: 0.7 });
-                        }
-                    }
-                }
-                next -= 1;
-                return notes;
-            };
-        })() },
         // Final Fantasy VII's battle theme, its opening bar from a MIDI of it, at 120 bpm (the
         // MIDI's 96 is a 2.5 s bar; whole seconds are needed): repeated F5 sixteenths with C5 on
         // every third and a run up to F#5, over F3+C4 chords
@@ -277,7 +240,8 @@
         volume = isNaN(savedVolume) ? 20 : savedVolume; // percent; 0 is a valid (silent) setting
         flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
         beepPattern = localStorage.getItem('pda_chain_timer_beep');
-        // Regular, Pulse and Rave (3.78) are gone; they and anything unknown become Chime
+        // Regular, Pulse and Rave (3.78), Warble and Sonic drowning (3.86) are gone; they and
+        // anything unknown become Chime
         if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'chime';
         wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
         idRange = localStorage.getItem('pda_chain_timer_id_range');
@@ -529,11 +493,9 @@
                     <option value="phone">Phone ring</option>
                     <option value="klaxon">Klaxon</option>
                     <option value="sos">SOS</option>
-                    <option value="warble">Warble</option>
                     <option value="ctu">24 phone</option>
-                    <option value="drown">Sonic drowning</option>
                     <option value="ff7">FF7 battle</option>
-                    <option value="ff6">FF6 boss</option>
+                    <option value="ff6">FF6 battle</option>
                     <option value="off">Off</option>
                 </select>
             </div>
@@ -589,8 +551,7 @@
                 <b>NO KEY</b> no API key set</p>
                 <p><b>Alarm</b>: sounds and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
                 Panic time; after that it can't be silenced. A hit cancels ACK.
-                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring, Klaxon, 24 phone, FF7 battle and FF6 boss repeat every 2 s, SOS every 4 s.
-                Sonic drowning speeds up as the chain runs down; its test plays it as at the Panic time.</p>
+                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring, Klaxon, 24 phone, FF7 battle and FF6 battle repeat every 2 s, SOS every 4 s.</p>
                 <p><b>Keep screen on</b> stops the screen sleeping while a chain runs (if the browser allows it).</p>
                 <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
@@ -1026,9 +987,8 @@
     window.addEventListener('resize', () => applySize(parseInt(sizeInput.value, 10)));
 
     // Test sound at the chosen volume when the slider is released or the sound picked
-    // (the tap also unlocks audio). A sound that changes as the chain runs down plays as it
-    // would at the panic time
-    const playTestSound = () => playSound(beepInput.value, parseInt(volumeInput.value, 10), null, criticalThreshold);
+    // (the tap also unlocks audio)
+    const playTestSound = () => playSound(beepInput.value, parseInt(volumeInput.value, 10), null);
     volumeInput.addEventListener('change', playTestSound);
     beepInput.addEventListener('change', playTestSound);
 
@@ -1046,18 +1006,15 @@
     }
 
     // Plays one cycle of an ALARM_SOUNDS sound. percent: volume, 0-100; bus: node to play
-    // into (null: straight to the speakers, for the OPT test); seconds: time left, for a sound
-    // whose notes depend on it. Returns false if audio is locked
-    function playSound(name, percent, bus, seconds) {
+    // into (null: straight to the speakers, for the OPT test). Returns false if audio is locked
+    function playSound(name, percent, bus) {
         try {
             initAudioContext();
             if (!audioCtx || audioCtx.state === 'suspended') return false;
             if (percent <= 0) return true;
             const peak = MAX_GAIN * percent / 100;
             const start = audioCtx.currentTime + 0.02;
-            const sound = ALARM_SOUNDS[name] || ALARM_SOUNDS.chime;
-            const notes = typeof sound.notes === 'function' ? sound.notes(seconds) : sound.notes;
-            for (const n of notes) {
+            for (const n of (ALARM_SOUNDS[name] || ALARM_SOUNDS.chime).notes) {
                 const t = start + n.t;
                 const g = peak * (n.g || 1);
                 const osc = audioCtx.createOscillator();
@@ -1093,7 +1050,7 @@
             alarmBus = audioCtx.createGain();
             alarmBus.connect(audioCtx.destination);
         }
-        if (playSound(beepPattern, volume, alarmBus, alarmSeconds)) {
+        if (playSound(beepPattern, volume, alarmBus)) {
             alarmCycleEnd = audioCtx.currentTime + (ALARM_SOUNDS[beepPattern] || ALARM_SOUNDS.chime).cycle;
         }
     }
