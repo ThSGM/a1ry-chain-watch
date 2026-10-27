@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.81
+// @version      3.82
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -57,10 +57,11 @@
 // Alarm (both times set in OPT):
 //   At or below the warning time (default 2:30) it flashes and sounds.
 //   ACK silences it until the panic time (default 2:00); from there it
-//   can't be silenced. The acknowledgement is shared across tabs and page
+//   can't be silenced. The panic time works on its own, even above the
+//   warning time or with the warning Off. The acknowledgement is shared across tabs and page
 //   loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
 //   OPT also sets the volume, the sound (Chime, Hi-lo, Yelp, Alarm clock,
-//   Phone ring, Klaxon, SOS, Warble or Off; all made in the browser, no
+//   Phone ring, Klaxon, SOS, Warble, 24 phone or Off; all made in the browser, no
 //   sound files) and the screen-edge flash, which pulses faster from the
 //   panic time.
 //
@@ -76,7 +77,9 @@
 // far left = off), its attack page shows a purple banner at the top, the
 // box border and the defender's panel turn purple, and the Start fight /
 // Join fight button is greyed out and does nothing (found by its text, as
-// Torn's class names change). Only the script's own picks (the same ID,
+// Torn's class names change). Until the page shows the target's health
+// the button is blocked too, with a "Reading target HP" banner, so a quick
+// tap can't start a fight first. Only the script's own picks (the same ID,
 // picked in the last PICK_WINDOW) are checked, so attack pages opened any
 // other way are left alone. To attack a blocked target anyway, raise that
 // limit or slide it to Off in OPT.
@@ -112,7 +115,7 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.81';
+    const SCRIPT_VERSION = '3.82';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
     // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
     // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
@@ -135,6 +138,13 @@
         sos: { cycle: 4, notes: morseNotes('... --- ...', 0.1, 800) },
         warble: { cycle: 1, notes: Array.from({ length: 12 }, (_, i) =>
             ({ t: i * 0.07, len: 0.07, f: i % 2 ? 1100 : 800, env: 'hold' })) },
+        // The CTU phone in 24, measured from a recording: 2+2 quiet pips at 697 Hz, 4 loud at
+        // 991 Hz, then 8 an octave down at 493 Hz, each about 33 ms on, 20 ms off
+        ctu: { cycle: 2, notes: [
+            ...pips([0, 0.052, 0.221, 0.271], 0.03, 697, [[1, 0.21], [3, 0.47], [5, 0.08]]),
+            ...pips([0.66, 0.708, 0.762, 0.817], 0.033, 991, [[1, 0.8], [3, 0.4]]),
+            ...pips(Array.from({ length: 8 }, (_, i) => 0.872 + i * 0.0546), 0.035, 493,
+                [[1, 0.35], [3, 0.35], [5, 0.35]])] },
         off: { cycle: 1, notes: [] }
     };
 
@@ -145,6 +155,12 @@
             for (const f of [400, 450]) notes.push({ t: start + t, len: 0.025, f, env: 'hold', g: 0.6 });
         }
         return notes;
+    }
+
+    // Buzzy pips starting at times (s), each len long: partials are [multiple of f, loudness]
+    // pairs played together, which gives the tone its colour
+    function pips(times, len, f, partials) {
+        return times.flatMap(t => partials.map(([h, g]) => ({ t, len, f: f * h, env: 'hold', g })));
     }
 
     // Morse: '.' is one unit, '-' three, a space a gap between letters
@@ -179,31 +195,38 @@
         localStorage.getItem('pda_chain_timer_alert_threshold') === '120') {
         localStorage.setItem('pda_chain_timer_alert_threshold', 150);
     }
-    // 0 is a valid setting for both (Off: no alarm / ACK always works)
-    const savedAlert = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold'));
-    const savedCritical = parseInt(localStorage.getItem('pda_chain_timer_critical_threshold'));
-    let alertThreshold = isNaN(savedAlert) ? 150 : savedAlert;
-    let criticalThreshold = isNaN(savedCritical) ? 120 : savedCritical;
+    // OPT settings. Read on load, and again when another tab saves them (main loop)
+    let alertThreshold, criticalThreshold, volume, flashEnabled, beepPattern, wakeEnabled, idRange, bigHealth, boxSize, apiKey;
+    function loadSettings() {
+        // 0 is a valid setting for both (Off: no alarm / ACK always works)
+        const savedAlert = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold'));
+        const savedCritical = parseInt(localStorage.getItem('pda_chain_timer_critical_threshold'));
+        alertThreshold = isNaN(savedAlert) ? 150 : savedAlert;
+        criticalThreshold = isNaN(savedCritical) ? 120 : savedCritical;
+        const savedVolume = parseInt(localStorage.getItem('pda_chain_timer_volume'));
+        volume = isNaN(savedVolume) ? 20 : savedVolume; // percent; 0 is a valid (silent) setting
+        flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
+        beepPattern = localStorage.getItem('pda_chain_timer_beep');
+        // Regular, Pulse and Rave (3.78) are gone; they and anything unknown become Chime
+        if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'chime';
+        wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
+        idRange = localStorage.getItem('pda_chain_timer_id_range');
+        if (!ID_RANGES[idRange]) idRange = 'both';
+        // 0 = off. Before 3.81 this was an on/off checkbox (flag_big) with a fixed 500
+        const savedBigHealth = parseInt(localStorage.getItem('pda_chain_timer_big_health'));
+        bigHealth = !isNaN(savedBigHealth) ? savedBigHealth :
+            localStorage.getItem('pda_chain_timer_flag_big') === 'false' ? 0 : DEFAULT_BIG_HEALTH;
+        boxSize = parseInt(localStorage.getItem('pda_chain_timer_size')) || 100; // percent of the original size
+        apiKey = localStorage.getItem('pda_chain_timer_api_key') || '';
+    }
+    loadSettings();
     localStorage.setItem('pda_chain_timer_critical_threshold', criticalThreshold);
+    // Changes when any tab presses Save
+    let settingsSeen = localStorage.getItem('pda_chain_timer_settings_saved');
     let alarmSeconds = 0;
-    const savedVolume = parseInt(localStorage.getItem('pda_chain_timer_volume'));
-    let volume = isNaN(savedVolume) ? 20 : savedVolume; // percent; 0 is a valid (silent) setting
-    let flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
-    let beepPattern = localStorage.getItem('pda_chain_timer_beep');
-    // Regular, Pulse and Rave (3.78) are gone; they and anything unknown become Chime
-    if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'chime';
-    let wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
-    let idRange = localStorage.getItem('pda_chain_timer_id_range');
-    if (!ID_RANGES[idRange]) idRange = 'both';
-    // 0 = off. Before 3.81 this was an on/off checkbox (flag_big) with a fixed 500
-    const savedBigHealth = parseInt(localStorage.getItem('pda_chain_timer_big_health'));
-    let bigHealth = !isNaN(savedBigHealth) ? savedBigHealth :
-        localStorage.getItem('pda_chain_timer_flag_big') === 'false' ? 0 : DEFAULT_BIG_HEALTH;
     let wakeLock = null; // the screen wake lock while held
     let wakeLockPending = false;
     let wantWakeLock = false;
-    let boxSize = parseInt(localStorage.getItem('pda_chain_timer_size')) || 100; // percent of the original size
-    let apiKey = localStorage.getItem('pda_chain_timer_api_key') || '';
     let isPaused = localStorage.getItem('pda_chain_timer_is_paused') === 'true';
 
     // -------------------------------------------------------------------
@@ -436,6 +459,7 @@
                     <option value="klaxon">Klaxon</option>
                     <option value="sos">SOS</option>
                     <option value="warble">Warble</option>
+                    <option value="ctu">24 phone</option>
                     <option value="off">Off</option>
                 </select>
             </div>
@@ -490,13 +514,14 @@
                 <b>NO KEY</b> no API key set</p>
                 <p><b>Alarm</b>: sounds and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
                 Panic time; after that it can't be silenced. A hit cancels ACK.
-                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring and Klaxon repeat every 2 s, SOS every 4 s.</p>
+                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring, Klaxon and 24 phone repeat every 2 s, SOS every 4 s.</p>
                 <p><b>Keep screen on</b> stops the screen sleeping while a chain runs (if the browser allows it).</p>
                 <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
                 <p>Tap the timers to open the attack page of a random inactive target, from the <b>Target range</b>.
                 If it has more health than <b>Block targets with HP over</b>, it gets a purple banner and
                 Start fight is blocked: tap again for another (or raise the limit, or slide it to Off, to attack anyway).
+                It's also blocked until the page shows the target's HP; if "Reading target HP" never goes away, slide it to Off.
                 Attack pages you open yourself aren't checked. Drag the box to move it.
                 <b>DASH</b> opens the dashboard in a new tab.</p>
                 <p>After a page load, sound plays only once you've tapped the page.</p>
@@ -724,13 +749,17 @@
     }
     const pickedTargetID = scriptPickOnLoad();
 
-    // The picked target's maximum health while on its attack page with blocking on, else
-    // null (any other page, including one Torn reaches without a reload)
-    function pickedTargetHealth() {
-        if (pickedTargetID === null || !bigHealth) return null;
+    // Why the fight on this page is blocked, or '' if it isn't. Only on the attack page of a
+    // picked target with blocking on (not one Torn reaches without a reload): blocked while its
+    // maximum health is over the limit, and until the page shows it, so a tap straight after
+    // the page loads can't start a fight
+    function blockReason() {
+        if (pickedTargetID === null || !bigHealth) return '';
         const params = new URLSearchParams(location.search);
-        const onPick = params.get('sid') === 'attack' && params.get('user2ID') === pickedTargetID;
-        return onPick ? readDefenderMaxHealth() : null;
+        if (params.get('sid') !== 'attack' || params.get('user2ID') !== pickedTargetID) return '';
+        const health = readDefenderMaxHealth();
+        if (health === null) return 'Reading target HP: fight blocked until it shows';
+        return health > bigHealth ? `BIG TARGET: HP ${health.toLocaleString()}, don't attack` : '';
     }
 
     // Torn's fight button, found by its text since its class names change between builds
@@ -741,15 +770,14 @@
     // Whether Torn's page currently carries our marks (defender outline, blocked button)
     let pageMarked = false;
 
-    // Above bigHealth: a banner with the picked target's maximum health, purple box border and
-    // defender outline, and the fight button greyed out. Checked every tick, as Torn redraws the page
-    // (a redrawn button or panel is a new element without the mark); marks are only written
-    // where missing
+    // While blocked: a banner with the reason, purple box border and defender outline, and the
+    // fight button greyed out. Checked every tick, as Torn redraws the page (a redrawn button or
+    // panel is a new element without the mark); marks are only written where missing
     function updateTargetFlag() {
-        const health = pickedTargetHealth();
-        const big = health !== null && health > bigHealth;
+        const reason = blockReason();
+        const big = reason !== '';
         container.classList.toggle('pda-target-big', big);
-        setText(bigBanner, big ? `BIG TARGET: HP ${health.toLocaleString()}, don't attack` : '');
+        setText(bigBanner, reason);
         bigBanner.classList.toggle('pda-flag-shown', big);
         if (!big && !pageMarked) return;
         pageMarked = big;
@@ -761,9 +789,9 @@
         for (const button of document.querySelectorAll('button')) {
             const blocked = button.hasAttribute('data-a1ry-blocked');
             if (big && isFightButton(button)) {
-                if (blocked) continue;
-                button.setAttribute('data-a1ry-blocked', '');
-                button.title = `Blocked by a1ry Chain Watch: max health ${health.toLocaleString()} is over ${bigHealth}`;
+                if (!blocked) button.setAttribute('data-a1ry-blocked', '');
+                // The reason changes once the health shows
+                if (button.title !== reason) button.title = reason;
             } else if (blocked) {
                 button.removeAttribute('data-a1ry-blocked');
                 button.removeAttribute('title');
@@ -771,15 +799,13 @@
         }
     }
 
-    // Swallows clicks on the fight button of a big picked target before Torn's page sees them
+    // Swallows clicks on a blocked fight button before Torn's page sees them
     // (capture phase on window runs first). Checked on each click rather than taken from the
     // last tick, so a click straight after the page loads is caught too. Enter/Space on the
     // button arrive as clicks; submit covers the button being in a form
     function blockBigFight(e) {
         const button = e.type === 'submit' ? e.submitter : e.target.closest && e.target.closest('button');
-        if (!button || !isFightButton(button)) return;
-        const health = pickedTargetHealth();
-        if (health === null || health <= bigHealth) return;
+        if (!button || !isFightButton(button) || !blockReason()) return;
         e.preventDefault();
         e.stopImmediatePropagation();
     }
@@ -792,7 +818,9 @@
     // -------------------------------------------------------------------
     // 3. UI Interaction Listeners
     // -------------------------------------------------------------------
+    // OPT opens the settings; pressed again while they're open, it saves and closes like Save
     cfgBtn.addEventListener('click', () => {
+        if (settingsPanel.style.display === 'flex') { closeSettingsBtn.click(); return; }
         settingsPanel.style.display = 'flex';
         container.classList.add('pda-settings-open');
     });
@@ -820,6 +848,7 @@
         localStorage.setItem('pda_chain_timer_size', boxSize);
         apiKey = apiInput.value.trim();
         localStorage.setItem('pda_chain_timer_api_key', apiKey);
+        localStorage.setItem('pda_chain_timer_settings_saved', Date.now());
         closeSettings();
     });
 
@@ -1031,8 +1060,10 @@
 
     function updateAlarm(seconds) {
         alarmSeconds = seconds;
-        const inAlert = seconds > 0 && seconds <= alertThreshold;
-        const critical = inAlert && seconds <= criticalThreshold;
+        // Panic counts on its own, so it still sounds when set above the warning time or with
+        // the warning Off
+        const critical = seconds > 0 && seconds <= criticalThreshold;
+        const inAlert = critical || (seconds > 0 && seconds <= alertThreshold);
         const sounding = critical || (inAlert && !isAcknowledged(seconds));
 
         container.classList.toggle('timer-warning-active', sounding);
@@ -1213,6 +1244,14 @@
             let savedPaused = localStorage.getItem('pda_chain_timer_is_paused') === 'true';
 
             if (isPaused !== savedPaused) setMinimized(savedPaused);
+
+            // Settings saved in another tab. An open OPT keeps what's typed in it
+            const settingsSaved = localStorage.getItem('pda_chain_timer_settings_saved');
+            if (settingsSaved !== settingsSeen) {
+                settingsSeen = settingsSaved;
+                loadSettings();
+                if (settingsPanel.style.display !== 'flex') fillSettingInputs();
+            }
 
             let xType = localStorage.getItem('pda_chain_timer_x_type');
             let xVal = localStorage.getItem('pda_chain_timer_x_val');
