@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.83
+// @version      3.84
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -61,7 +61,8 @@
 //   warning time or with the warning Off. The acknowledgement is shared across tabs and page
 //   loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
 //   OPT also sets the volume, the sound (Chime, Hi-lo, Yelp, Alarm clock,
-//   Phone ring, Klaxon, SOS, Warble, 24 phone or Off; all made in the browser, no
+//   Phone ring, Klaxon, SOS, Warble, 24 phone, FF7 battle, FF6 boss, Sonic drowning (speeds up as
+//   the chain runs down) or Off; all made in the browser, no
 //   sound files) and the screen-edge flash, which pulses faster from the
 //   panic time.
 //
@@ -115,14 +116,15 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.83';
+    const SCRIPT_VERSION = '3.84';
     // OPT's Update button: a userscript manager offers to install what's here
     const UPDATE_URL = 'https://update.greasyfork.org/scripts/601300/a1ry%20Chain%20Watch.user.js';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
     // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
     // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
     // sound louder, so they get less), env 'pluck' (fades out from the start, the default) or
-    // 'hold' (steady, with a short fade in and out)
+    // 'hold' (steady, with a short fade in and out). notes can also be a function of the
+    // seconds left that returns them, for a sound that changes as the chain runs down
     const ALARM_SOUNDS = {
         chime: { cycle: 1, notes: [
             { t: 0, len: 0.6, f: 1046.5 }, { t: 0.15, len: 0.6, f: 1318.5 }, { t: 0.3, len: 0.7, f: 1568 }] },
@@ -148,8 +150,73 @@
             ...pips([0.66, 0.708, 0.762, 0.817], 0.033, 991, [[1, 1.6], [3, 0.8]]),
             ...pips(Array.from({ length: 8 }, (_, i) => 0.872 + i * 0.0546), 0.035, 493,
                 [[1, 0.7], [3, 0.7], [5, 0.7]])] },
+        // Sonic's drowning countdown, from a MIDI of it: notes in pairs, C4 then C5 (over a bass
+        // two octaves down, with a kick and a tick), two pairs on C then two on C#. It speeds up
+        // as the chain runs down, from a note every 0.2 s at the warning time (the game's start)
+        // to every 0.1 s at the end, with the game's fast C/C# trill over the last fifth. Each
+        // call returns the next second, carrying on where the last one stopped, so the pattern
+        // runs on unbroken
+        drown: { cycle: 1, notes: (() => {
+            let step = 0; // notes played so far
+            let next = 0; // when the next note is due, s into this second
+            return seconds => {
+                const top = Math.max(alertThreshold, criticalThreshold) || 150;
+                const urgency = Math.min(1, Math.max(0, 1 - seconds / top)); // 0 calm, 1 frantic
+                const gap = 0.2 - 0.1 * urgency;
+                const notes = [];
+                for (; next < 1; next += gap, step++) {
+                    const t = next;
+                    const high = step % 2 === 1;
+                    const f = (Math.floor(step / 4) % 2 ? 277.18 : 261.63) * (high ? 2 : 1);
+                    const len = Math.min(0.09, gap * 0.9);
+                    notes.push({ t, len, f, type: 'square', env: 'hold', g: 1 },
+                        { t, len, f: f / 4, type: 'triangle', env: 'hold', g: 1.5 },
+                        high ? { t, len: 0.025, f: 5000, type: 'square', g: 0.2 } // tick
+                            : { t, len: 0.12, f: 160, f2: 45, g: 1.5 }); // kick
+                    if (urgency > 0.8) {
+                        for (const [dt, tf] of [[0, 523.25], [gap / 2, 554.37]]) {
+                            notes.push({ t: t + dt, len: gap * 0.45, f: tf, type: 'square', env: 'hold', g: 0.7 });
+                        }
+                    }
+                }
+                next -= 1;
+                return notes;
+            };
+        })() },
+        // Final Fantasy VII's battle theme, its opening bar from a MIDI of it, at 120 bpm (the
+        // MIDI's 96 is a 2.5 s bar; whole seconds are needed): repeated F5 sixteenths with C5 on
+        // every third and a run up to F#5, over F3+C4 chords
+        ff7: { cycle: 2, notes: musicBar(
+            [[0, 72], [0, 77], [1, 77], [2, 77], [3, 72], [3, 77], [4, 77], [5, 77], [6, 72], [6, 77],
+                [7, 77], [8, 77], [9, 77], [10, 72], [11, 75], [12, 78], [13, 77], [14, 75], [15, 78]],
+            [[0, 3, [53, 60]], [3, 1, [53, 60]], [6, 2, [53, 60]], [9, 3, [53, 60]], [12, 2, [53, 60]],
+                [14, 2, [51, 58]]],
+            1.4, 0.8) },
+        // Final Fantasy VI's The Decisive Battle, bar 3 of a MIDI of it (its own 120 bpm): the
+        // top line climbs E5 F5 F#5 F5 E5 over a C5 A4 figure, with an A2 bass in 3s
+        ff6: { cycle: 2, notes: musicBar(
+            [[0, 76], [1, 72], [2, 69], [3, 77], [4, 72], [5, 69], [6, 78], [7, 72], [8, 69], [9, 77],
+                [10, 72], [11, 69], [12, 76], [13, 72], [14, 71], [15, 75]],
+            [[0, 3, [45]], [3, 1, [45]], [6, 2, [45]], [9, 3, [45]], [12, 2, [45]], [14, 2, [43]]],
+            1.9, 1.3) },
         off: { cycle: 1, notes: [] }
     };
+
+    // Pitch in Hz of a MIDI note number (69 = A4 = 440 Hz)
+    function midiHz(n) {
+        return 440 * Math.pow(2, (n - 69) / 12);
+    }
+
+    // One 2 s bar of music in sixteenth steps (0.125 s, 120 bpm). right: [step, MIDI note], a
+    // soft piano-like tone (the note with quieter 2nd and 3rd harmonics, fading out); left: [step,
+    // length in steps, MIDI notes], low notes that fade over their length
+    function musicBar(right, left, rightGain, leftGain) {
+        return [
+            ...right.flatMap(([s, n]) => [[1, 1], [2, 0.35], [3, 0.12]].map(([h, g]) =>
+                ({ t: s * 0.125, len: 0.4, f: midiHz(n) * h, g: g * rightGain }))),
+            ...left.flatMap(([s, l, ns]) => ns.map(n =>
+                ({ t: s * 0.125, len: l * 0.125 + 0.1, f: midiHz(n), type: 'triangle', g: leftGain })))];
+    }
 
     // Old UK phone ring: two tones together, switched on and off 20 times a second
     function ringBurst(start, length) {
@@ -464,6 +531,9 @@
                     <option value="sos">SOS</option>
                     <option value="warble">Warble</option>
                     <option value="ctu">24 phone</option>
+                    <option value="drown">Sonic drowning</option>
+                    <option value="ff7">FF7 battle</option>
+                    <option value="ff6">FF6 boss</option>
                     <option value="off">Off</option>
                 </select>
             </div>
@@ -519,7 +589,8 @@
                 <b>NO KEY</b> no API key set</p>
                 <p><b>Alarm</b>: sounds and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
                 Panic time; after that it can't be silenced. A hit cancels ACK.
-                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring, Klaxon and 24 phone repeat every 2 s, SOS every 4 s.</p>
+                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring, Klaxon, 24 phone, FF7 battle and FF6 boss repeat every 2 s, SOS every 4 s.
+                Sonic drowning speeds up as the chain runs down; its test plays it as at the Panic time.</p>
                 <p><b>Keep screen on</b> stops the screen sleeping while a chain runs (if the browser allows it).</p>
                 <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
                 No alarm while this tab is in the background.</p>
@@ -955,8 +1026,9 @@
     window.addEventListener('resize', () => applySize(parseInt(sizeInput.value, 10)));
 
     // Test sound at the chosen volume when the slider is released or the sound picked
-    // (the tap also unlocks audio)
-    const playTestSound = () => playSound(beepInput.value, parseInt(volumeInput.value, 10), null);
+    // (the tap also unlocks audio). A sound that changes as the chain runs down plays as it
+    // would at the panic time
+    const playTestSound = () => playSound(beepInput.value, parseInt(volumeInput.value, 10), null, criticalThreshold);
     volumeInput.addEventListener('change', playTestSound);
     beepInput.addEventListener('change', playTestSound);
 
@@ -974,15 +1046,18 @@
     }
 
     // Plays one cycle of an ALARM_SOUNDS sound. percent: volume, 0-100; bus: node to play
-    // into (null: straight to the speakers, for the OPT test). Returns false if audio is locked
-    function playSound(name, percent, bus) {
+    // into (null: straight to the speakers, for the OPT test); seconds: time left, for a sound
+    // whose notes depend on it. Returns false if audio is locked
+    function playSound(name, percent, bus, seconds) {
         try {
             initAudioContext();
             if (!audioCtx || audioCtx.state === 'suspended') return false;
             if (percent <= 0) return true;
             const peak = MAX_GAIN * percent / 100;
             const start = audioCtx.currentTime + 0.02;
-            for (const n of (ALARM_SOUNDS[name] || ALARM_SOUNDS.chime).notes) {
+            const sound = ALARM_SOUNDS[name] || ALARM_SOUNDS.chime;
+            const notes = typeof sound.notes === 'function' ? sound.notes(seconds) : sound.notes;
+            for (const n of notes) {
                 const t = start + n.t;
                 const g = peak * (n.g || 1);
                 const osc = audioCtx.createOscillator();
@@ -1018,7 +1093,7 @@
             alarmBus = audioCtx.createGain();
             alarmBus.connect(audioCtx.destination);
         }
-        if (playSound(beepPattern, volume, alarmBus)) {
+        if (playSound(beepPattern, volume, alarmBus, alarmSeconds)) {
             alarmCycleEnd = audioCtx.currentTime + (ALARM_SOUNDS[beepPattern] || ALARM_SOUNDS.chime).cycle;
         }
     }
