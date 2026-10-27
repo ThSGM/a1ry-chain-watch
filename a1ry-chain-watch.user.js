@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.84
+// @version      3.85
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -116,9 +116,9 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.84';
-    // OPT's Update button: a userscript manager offers to install what's here
-    const UPDATE_URL = 'https://update.greasyfork.org/scripts/601300/a1ry%20Chain%20Watch.user.js';
+    const SCRIPT_VERSION = '3.85';
+    // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
+    const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
     // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
     // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
@@ -571,7 +571,7 @@
             <div class="pda-setting-buttons">
                 <button class="pda-btn" id="pda-settings-close">Save</button>
                 <button class="pda-btn" id="pda-help-btn" title="Help">?</button>
-                <a class="pda-btn" id="pda-update-btn" href="${UPDATE_URL}" target="_blank" rel="noopener" title="Install the latest version from Greasy Fork">Update</a>
+                <a class="pda-btn" id="pda-update-btn" href="${UPDATE_URL}" target="_blank" rel="noopener" title="Open the script's Greasy Fork page to install the latest version">Update</a>
             </div>
             <div id="pda-help">
                 <p><b>Left timer</b>: read from the page, no API. <b>Right timer</b>: Torn API.
@@ -601,8 +601,8 @@
                 Attack pages you open yourself aren't checked. Drag the box to move it.
                 <b>DASH</b> opens the dashboard in a new tab.</p>
                 <p>After a page load, sound plays only once you've tapped the page.</p>
-                <p><b>Update</b> opens the latest version on Greasy Fork; Tampermonkey or Violentmonkey then
-                offers to install it. In TornPDA, update it in the app's userscript settings instead.</p>
+                <p><b>Update</b> opens the script's Greasy Fork page; its Install button updates it in Tampermonkey
+                or Violentmonkey. In TornPDA, update it in the app's userscript settings instead.</p>
             </div>
         </div>
     `;
