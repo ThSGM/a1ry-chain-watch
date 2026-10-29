@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.92
+// @version      3.93
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -53,6 +53,16 @@
 //
 // The alert follows the left timer, or the right one when the left has
 // nothing. Chain count (bar under the timers, e.g. 1,234) comes from the API.
+//
+// Health bar (the bar behind the chain count, 0-100, number on the right):
+//   Scored from the left timer, no API. A hit shows up as the chain end
+//   time jumping forward; the time left just before it gives the score:
+//   over 3:00 +1, 2:00-3:00 -10, 1:00-2:00 -20, under 1:00 straight to 1
+//   (the bar flashes red while at 1). Hits keep it between 1 and 100. Every
+//   faction hit counts (the page can't tell whose it was), and only hits
+//   seen by a visible, unminimised tab that read the time the second
+//   before. 0 when the chain ends and at the start of each browser session
+//   (a session cookie marks it); shared across tabs and page loads.
 //
 // Alarm (both times set in OPT):
 //   At or below the warning time (default 2:30) it flashes and sounds.
@@ -112,8 +122,10 @@
     // Beep gain at 100% volume. 0.4 until 3.78 was far too loud at the top; 100% is now what
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
+    // Health bar: the most it holds
+    const HP_MAX = 100;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.92';
+    const SCRIPT_VERSION = '3.93';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
@@ -357,7 +369,25 @@
         .pda-timer-half { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
         .pda-timer-source { margin-top: calc(2px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
-        #pda-timer-count { flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(10px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
+        #pda-timer-count { position: relative; flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(10px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
+        /* Health bar: the fill sits behind the chain count; its width and colour are set from
+           the script. Effects animate only opacity and transform, so the page isn't repainted */
+        #pda-hp-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; transition: width 0.4s ease-out, background-color 0.4s; }
+        #pda-timer-count-text { position: relative; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+        #pda-hp-text { position: absolute; right: calc(3px * var(--s)); top: 0; font-size: calc(7px * var(--s)); font-weight: normal; color: #ddd !important; font-family: Arial, sans-serif; text-shadow: 0 0 2px #000; }
+        #pda-timer-count::after { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; opacity: 0; pointer-events: none; }
+        #pda-hp-pop { position: absolute; right: calc(3px * var(--s)); bottom: 100%; z-index: 1; opacity: 0; pointer-events: none; font-family: Arial, sans-serif; text-shadow: 0 0 3px #000; }
+        #pda-timer-count.pda-hp-gain::after { background: #4f4; animation: pda-hp-flash 0.6s ease-out; }
+        #pda-timer-count.pda-hp-loss::after { background: #f22; animation: pda-hp-flash 0.6s ease-out; }
+        #pda-timer-count.pda-hp-loss { animation: pda-hp-shake 0.4s; }
+        .pda-hp-gain #pda-hp-pop { color: #6f6 !important; animation: pda-hp-float 1s ease-out; }
+        .pda-hp-loss #pda-hp-pop { color: #f66 !important; animation: pda-hp-float 1s ease-out; }
+        /* At 1: the fill flashes red, 2.5 flashes/s like the fast screen flash */
+        #pda-timer-count.pda-hp-low #pda-hp-fill { width: 100% !important; background: #ff2a2a !important; animation: pda-hp-low 0.4s infinite alternate; }
+        @keyframes pda-hp-flash { from { opacity: 0.8; } to { opacity: 0; } }
+        @keyframes pda-hp-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+        @keyframes pda-hp-float { from { opacity: 1; transform: translateY(4px); } to { opacity: 0; transform: translateY(-12px); } }
+        @keyframes pda-hp-low { from { opacity: 0.15; } to { opacity: 0.8; } }
         #pda-settings-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 17, 17, 0.95) !important; display: none; flex-direction: column; padding: 4px 8px; z-index: 10; }
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
@@ -452,7 +482,7 @@
                 <span class="pda-timer-source" id="pda-timer-source-api"></span>
             </div>
         </div>
-        <div id="pda-timer-count"></div>
+        <div id="pda-timer-count"><div id="pda-hp-fill"></div><span id="pda-timer-count-text"></span><span id="pda-hp-text"></span><span id="pda-hp-pop"></span></div>
 
         <div id="pda-settings-panel">
             <div class="pda-setting-block">
@@ -543,6 +573,7 @@
                 <p><b>Left timer</b> = read from page<br>
                 <b>Right timer</b> = Torn API</p>
                 <p>Click/tap timers for target</p>
+                <p><b>Bottom bar</b> = chain count over health (0-100): hit over 3:00 +1, 2:00-3:00 -10, 1:00-2:00 -20, under 1:00 = 1. Resets when the chain ends or the browser closes</p>
                 <p><b>MIN</b> = minimize<br>
                 <b>OPT</b> = options<br>
                 <b>DASH</b> = open dashboard</p>
@@ -572,7 +603,11 @@
     const localLabel = container.querySelector('#pda-timer-source-local');
     const apiText = container.querySelector('#pda-timer-text-api');
     const apiLabel = container.querySelector('#pda-timer-source-api');
-    const countLabel = container.querySelector('#pda-timer-count');
+    const countBar = container.querySelector('#pda-timer-count');
+    const countLabel = container.querySelector('#pda-timer-count-text');
+    const hpFill = container.querySelector('#pda-hp-fill');
+    const hpText = container.querySelector('#pda-hp-text');
+    const hpPop = container.querySelector('#pda-hp-pop');
     const pauseBtn = container.querySelector('#pda-timer-pause-btn');
     const ackBtn = container.querySelector('#pda-timer-ack-btn');
     const cfgBtn = container.querySelector('#pda-timer-cfg-btn');
@@ -650,6 +685,84 @@
 
     function localMemorySource() {
         return 'MEM-' + (localStorage.getItem('pda_chain_timer_local_src') || '?');
+    }
+
+    // -------------------------------------------------------------------
+    // Health bar: scored from the local timer, never the API
+    // -------------------------------------------------------------------
+    // A session cookie (no expiry) is gone once the browser closes, so its absence means a new
+    // session: health starts again from 0. localStorage alone would outlive the browser, and
+    // sessionStorage isn't shared with new tabs
+    if (!document.cookie.split('; ').includes('a1ry_hp_session=1')) {
+        localStorage.setItem('pda_chain_timer_hp', 0);
+        document.cookie = 'a1ry_hp_session=1; path=/; secure; samesite=lax';
+    }
+    // When this tab last read a time from the page (MEM doesn't count). A hit is only scored
+    // when the tab read the time the second before, so the time left at the hit is known
+    let lastPageRead = 0;
+    let shownHp = -1;
+
+    // Called with each time read from the page, before saveLocalExpire stores it. The saved end
+    // time is the newest any tab has read, so the first tab to see a hit stores the new end
+    // time and the others then see no jump: each hit is scored once.
+    // zeroIsEnd: a 0 from this source means no chain (BAR, COOL, ATK, or SES with no end time;
+    // not a stale SES that has run down, nor the loose DOM match)
+    function updateHealth(seconds, zeroIsEnd) {
+        const now = Date.now();
+        const savedExpire = parseInt(localStorage.getItem('pda_chain_timer_local_expire')) || 0;
+        const fresh = now - lastPageRead <= 3000;
+        lastPageRead = now;
+        const hp = parseInt(localStorage.getItem('pda_chain_timer_hp')) || 0;
+
+        if (seconds === 0) {
+            // Only once the known end time has passed, so a 00:00 shown while a page loads
+            // mid-chain doesn't wipe it
+            if (zeroIsEnd && hp && savedExpire < now + 3000) setHealth(0, null);
+            return;
+        }
+        // A hit moves the end time forward by minutes; reading jitter is 1-2 s
+        const left = (savedExpire - now) / 1000;
+        if (!fresh || left <= 0 || now + seconds * 1000 - savedExpire <= 3000) return;
+
+        let next, text;
+        if (left > 180) { next = hp + 1; text = '+1'; }
+        else if (left >= 120) { next = hp - 10; text = '\u221210'; }
+        else if (left >= 60) { next = hp - 20; text = '\u221220'; }
+        else { next = 1; text = '\u21921'; }
+        setHealth(Math.min(HP_MAX, Math.max(1, next)), { text, gain: left > 180 });
+    }
+
+    // event: { text, gain } for the effect, saved so other tabs play it too; null for none
+    function setHealth(hp, event) {
+        localStorage.setItem('pda_chain_timer_hp', hp);
+        if (!event) return;
+        localStorage.setItem('pda_chain_timer_hp_event', JSON.stringify(event));
+        playHealthEffect(event);
+    }
+
+    function playHealthEffect(event) {
+        hpPop.textContent = event.text;
+        countBar.classList.remove('pda-hp-gain', 'pda-hp-loss');
+        void countBar.offsetWidth; // restarts the animation when the same class comes back
+        countBar.classList.add(event.gain ? 'pda-hp-gain' : 'pda-hp-loss');
+    }
+
+    // Other tabs' hits. The storage event never fires in the tab that made the change
+    window.addEventListener('storage', (e) => {
+        if (e.key !== 'pda_chain_timer_hp_event' || !e.newValue) return;
+        try { playHealthEffect(JSON.parse(e.newValue)); } catch (err) { /* not ours */ }
+    });
+
+    // Touches the page only when the value changed
+    function renderHealth() {
+        const hp = parseInt(localStorage.getItem('pda_chain_timer_hp')) || 0;
+        if (hp === shownHp) return;
+        shownHp = hp;
+        hpFill.style.width = (hp / HP_MAX * 100) + '%';
+        hpFill.style.backgroundColor = hp >= 60 ? '#2a7a2a' : hp >= 30 ? '#9a7400' : '#a82020';
+        countBar.classList.toggle('pda-hp-low', hp === 1);
+        setText(hpText, String(hp));
+        countBar.title = `Health ${hp}/${HP_MAX}`;
     }
 
     // -------------------------------------------------------------------
@@ -1139,6 +1252,7 @@
     function updateLocalTimer() {
         let seconds = -1;
         let src = '';
+        let zeroIsEnd = true; // a 0 read here means the chain is over (see updateHealth)
 
         // Priority 1: Sidebar chain bar. Torn renamed chain-bar___ to chainBar___ (and
         // bar-timeleft___ to barTimeLeft___), so accept both. The time element by name first; if
@@ -1185,6 +1299,8 @@
             if (chain && typeof chain.timestampToUpdate === 'number') {
                 seconds = Math.max(0, chain.timestampToUpdate - Math.floor(Date.now() / 1000));
                 src = 'SES';
+                // Stale sidebar data runs down to 0 mid-chain; only no end time means no chain
+                zeroIsEnd = chain.timestampToUpdate === 0;
             }
         }
 
@@ -1200,6 +1316,7 @@
         }
 
         if (seconds >= 0) {
+            updateHealth(seconds, zeroIsEnd && src !== 'DOM');
             saveLocalExpire(seconds, src);
         } else {
             // Priority 5: local time saved by this or another tab
@@ -1305,6 +1422,7 @@
         const localSeconds = updateLocalTimer();
         const apiSeconds = updateApiTimer(localSeconds > 0);
         setText(countLabel, localStorage.getItem('pda_chain_timer_count') || '-');
+        renderHealth();
         updateTargetFlag();
 
         // Alert follows the local timer; the API is the backup when the local one has nothing

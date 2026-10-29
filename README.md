@@ -21,7 +21,11 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
   panic time. The beep
   volume, the screen flash and the box size (75-400 %) are set in **OPT**.
 - Minimised, it gives no alarm at all.
-- Shows the chain count (e.g. `1,234`) in a bar under the timers.
+- Shows the chain count (e.g. `1,234`) in a bar under the timers. The bar is also a health bar
+  (0-100), worked out from the left timer with no API calls. A hit with over 3:00 left gives +1,
+  2:00-3:00 gives -10, 1:00-2:00 gives -20, and under 1:00 drops it to 1, where it flashes red.
+  It goes to 0 when the chain ends and starts again from 0 each time you open the browser. Every
+  faction hit counts, but only while a tab with the box is open and visible.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
 - Tap **DASH** to open the [dashboard](https://naughtybot.unifiedbot.net/) in a new tab.
 - Tap **MIN** to minimise it; tap the circle to bring it back.
