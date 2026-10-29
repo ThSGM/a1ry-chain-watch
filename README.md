@@ -21,7 +21,7 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
   panic time. The beep
   volume, the screen flash and the box size (75-400 %) are set in **OPT**.
 - Minimised, it gives no alarm at all.
-- Shows the chain count (e.g. `5/10`) in the top-left corner.
+- Shows the chain count (e.g. `5 / 10`, `50,000 / 100,000`) in neon green in the top-left corner.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
 - Tap **DASH** to open the [dashboard](https://naughtybot.unifiedbot.net/) in a new tab.
 - Tap **MIN** to minimise it; tap the circle to bring it back.

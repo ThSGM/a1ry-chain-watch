@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.89
+// @version      3.90
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -52,7 +52,7 @@
 //   NO KEY       No API key set (OPT)
 //
 // The alert follows the left timer, or the right one when the left has
-// nothing. Chain count (top-left, e.g. 5/10) comes from the API.
+// nothing. Chain count (top-left, e.g. 5 / 10) comes from the API.
 //
 // Alarm (both times set in OPT):
 //   At or below the warning time (default 2:30) it flashes and sounds.
@@ -61,7 +61,7 @@
 //   warning time or with the warning Off. The acknowledgement is shared across tabs and page
 //   loads, and a hit cancels it. Minimised (MIN) = no alarm at all.
 //   OPT also sets the volume, the sound (Chime, Hi-lo, Yelp, Alarm clock,
-//   Phone ring, Klaxon, SOS, 24 phone, FF7 battle, FF6 battle or Off; all made in the browser, no
+//   Phone ring, Klaxon, SOS, 24 phone, FF7 battle, FF6 battle (the default) or Off; all made in the browser, no
 //   sound files) and the screen-edge flash, which pulses faster from the
 //   panic time.
 //
@@ -73,7 +73,7 @@
 // Random targets (tap the timers): a random ID from the target range
 // chosen in OPT (3.0M-3.4M, 4.2M-4.55M or both, the default), never one in
 // excludedIDs. If a target picked this way has more maximum health than
-// "Block targets with HP over" in OPT (a slider, 100-2000, default 500,
+// "Block targets with HP over" in OPT (a slider, 100-2000, default 1000,
 // far left = off), its attack page shows a purple banner at the top, the
 // box border and the defender's panel turn purple, and the Start fight /
 // Join fight button is greyed out and does nothing (found by its text, as
@@ -98,7 +98,7 @@
     const excludedIDs = [3133682, 3350281, 3134993, 3397129];
     // Default for "Block targets with HP over" (OPT): a picked target with more maximum health
     // than this is blocked
-    const DEFAULT_BIG_HEALTH = 500;
+    const DEFAULT_BIG_HEALTH = 1000;
     // An attack page is checked only if its target was picked this recently (ms)
     const PICK_WINDOW = 120000;
 
@@ -113,7 +113,7 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.89';
+    const SCRIPT_VERSION = '3.90';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
@@ -239,8 +239,8 @@
         flashEnabled = localStorage.getItem('pda_chain_timer_flash') !== 'false';
         beepPattern = localStorage.getItem('pda_chain_timer_beep');
         // Regular, Pulse and Rave (3.78), Warble and Sonic drowning (3.86) are gone; they and
-        // anything unknown become Chime
-        if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'chime';
+        // anything unknown (or nothing saved yet) become FF6 battle, the default
+        if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'ff6';
         wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
         idRange = localStorage.getItem('pda_chain_timer_id_range');
         if (!ID_RANGES[idRange]) idRange = 'both';
@@ -357,7 +357,7 @@
         .pda-timer-half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
         .pda-timer-source { position: absolute; left: 0; right: 0; bottom: calc(1px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
-        #pda-timer-count { position: absolute; left: calc(3px * var(--s)); top: calc(2px * var(--s)); font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; }
+        #pda-timer-count { position: absolute; left: calc(3px * var(--s)); top: calc(2px * var(--s)); font-size: calc(7px * var(--s)); font-weight: bold; line-height: 1; white-space: nowrap; color: #39ff14 !important; text-shadow: 0 0 calc(3px * var(--s)) rgba(57, 255, 20, 0.8); font-family: Arial, sans-serif; pointer-events: none; }
         #pda-settings-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 17, 17, 0.95) !important; display: none; flex-direction: column; padding: 4px 8px; z-index: 10; }
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
@@ -540,33 +540,20 @@
                 <a class="pda-btn" id="pda-update-btn" href="${UPDATE_URL}" target="_blank" rel="noopener" title="Open the script's Greasy Fork page to install the latest version">Update</a>
             </div>
             <div id="pda-help">
-                <p><b>Left timer</b>: read from the page, no API. <b>Right timer</b>: Torn API.
-                If they disagree, one has a problem. The code under each says where the time came from.</p>
-                <p><b>BAR</b> sidebar chain bar<br>
-                <b>COOL</b> chain bar in cooldown (no chain)<br>
-                <b>ATK</b> attack page header<br>
-                <b>SES</b> Torn's saved sidebar data<br>
-                <b>DOM</b> other chain text on the page<br>
-                <b>MEM-x</b> time saved earlier by a tab (x = where from)<br>
-                <b>NONE</b> no local time found</p>
-                <p><b>API 4s</b> API data, 4 s old<br>
-                <b>API-ERR2</b> wrong key (5 = too many calls)<br>
-                <b>API-NET</b> no connection to the API<br>
-                <b>NO KEY</b> no API key set</p>
-                <p><b>Alarm</b>: sounds and flashes orange from the Warning time, red from the Panic time. <b>ACK</b> silences it until the
-                Panic time; after that it can't be silenced. A hit cancels ACK.
-                <b>Sound</b> picks the alarm sound (Off = flash only). Phone ring, Klaxon, 24 phone, FF7 battle and FF6 battle repeat every 2 s, SOS every 4 s.</p>
-                <p><b>Keep screen on</b> stops the screen sleeping while a chain runs (if the browser allows it).</p>
-                <p><b>MIN</b> minimises the box and turns the alarm off. Tap the circle to bring it back.
-                No alarm while this tab is in the background.</p>
-                <p>Tap the timers to open the attack page of a random inactive target, from the <b>Target range</b>.
-                If it has more health than <b>Block targets with HP over</b>, it gets a purple banner and
-                Start fight is blocked: tap again for another (or raise the limit, or untick <b>Block big targets</b>, to attack anyway).
-                Attack pages you open yourself aren't checked. Drag the box to move it.
-                <b>DASH</b> opens the dashboard in a new tab.</p>
-                <p>After a page load, sound plays only once you've tapped the page.</p>
-                <p><b>Update</b> opens the script's Greasy Fork page; its Install button updates it in Tampermonkey
-                or Violentmonkey. In TornPDA, update it in the app's userscript settings instead.</p>
+                <p><b>Left timer</b> = read from page<br>
+                <b>Right timer</b> = Torn API</p>
+                <p>Click/tap timers for target</p>
+                <p><b>MIN</b> = minimize<br>
+                <b>OPT</b> = options<br>
+                <b>DASH</b> = open dashboard</p>
+                <p>Scrape info<br>
+                <b>BAR</b> = sidebar<br>
+                <b>ATK</b> = attack page header<br>
+                <b>SES</b> = Torn saved sidebar info<br>
+                <b>DOM</b> = other chain text on page<br>
+                <b>MEM-x</b> = time saved from tab<br>
+                <b>API-ERR2</b> = wrong API key<br>
+                <b>NO KEY</b> = no API key set</p>
             </div>
         </div>
     `;
@@ -1240,7 +1227,7 @@
                     localStorage.setItem('pda_chain_timer_api_expire', Date.now() + (data.chain.timeout * 1000));
                     localStorage.setItem('pda_chain_timer_api_time', Date.now());
                     localStorage.setItem('pda_chain_timer_api_error', '');
-                    localStorage.setItem('pda_chain_timer_count', `${data.chain.current}/${data.chain.max}`);
+                    localStorage.setItem('pda_chain_timer_count', `${data.chain.current.toLocaleString('en-US')} / ${data.chain.max.toLocaleString('en-US')}`);
                 } else {
                     // Torn returns {error: {code, error}} for bad keys, access level, rate limits
                     localStorage.setItem('pda_chain_timer_api_error', 'API-ERR' + (data && data.error ? data.error.code : '?'));
