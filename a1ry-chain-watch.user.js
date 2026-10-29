@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.90
+// @version      3.91
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -52,7 +52,7 @@
 //   NO KEY       No API key set (OPT)
 //
 // The alert follows the left timer, or the right one when the left has
-// nothing. Chain count (top-left, e.g. 5 / 10) comes from the API.
+// nothing. Chain count (bar under the timers, e.g. 1,234) comes from the API.
 //
 // Alarm (both times set in OPT):
 //   At or below the warning time (default 2:30) it flashes and sounds.
@@ -113,7 +113,7 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.90';
+    const SCRIPT_VERSION = '3.91';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
@@ -322,7 +322,7 @@
             flex-direction: column;
             overflow: hidden;
             width: calc(140px * var(--s));
-            height: calc(65px * var(--s));
+            height: calc(78px * var(--s));
             box-sizing: border-box;
             touch-action: none;
             user-select: none;
@@ -357,7 +357,7 @@
         .pda-timer-half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
         .pda-timer-source { position: absolute; left: 0; right: 0; bottom: calc(1px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
-        #pda-timer-count { position: absolute; left: calc(3px * var(--s)); top: calc(2px * var(--s)); font-size: calc(7px * var(--s)); font-weight: bold; line-height: 1; white-space: nowrap; color: #39ff14 !important; text-shadow: 0 0 calc(3px * var(--s)) rgba(57, 255, 20, 0.8); font-family: Arial, sans-serif; pointer-events: none; }
+        #pda-timer-count { flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(10px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
         #pda-settings-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 17, 17, 0.95) !important; display: none; flex-direction: column; padding: 4px 8px; z-index: 10; }
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
@@ -389,7 +389,7 @@
            screen. Sizes are set directly rather than with zoom/transform, which would also move
            the box or let it spill off the screen */
         #pda-chain-timer-container.pda-settings-open { height: auto; width: min(220px, calc(100vw - 20px)); }
-        .pda-settings-open #pda-timer-display { display: none; }
+        .pda-settings-open #pda-timer-display, .pda-settings-open #pda-timer-count { display: none; }
         .pda-settings-open #pda-settings-panel { position: static; padding: 5px 8px; }
         .pda-settings-open .pda-setting-row { margin-bottom: 4px; font-size: 11px; }
         .pda-settings-open .pda-setting-block .pda-setting-row { margin-bottom: 0; }
@@ -446,13 +446,13 @@
             <div class="pda-timer-half" id="pda-timer-half-local">
                 <span id="pda-timer-text-local">--:--</span>
                 <span class="pda-timer-source" id="pda-timer-source-local"></span>
-                <span id="pda-timer-count"></span>
             </div>
             <div class="pda-timer-half" id="pda-timer-half-api">
                 <span id="pda-timer-text-api">--:--</span>
                 <span class="pda-timer-source" id="pda-timer-source-api"></span>
             </div>
         </div>
+        <div id="pda-timer-count"></div>
 
         <div id="pda-settings-panel">
             <div class="pda-setting-block">
@@ -1227,7 +1227,7 @@
                     localStorage.setItem('pda_chain_timer_api_expire', Date.now() + (data.chain.timeout * 1000));
                     localStorage.setItem('pda_chain_timer_api_time', Date.now());
                     localStorage.setItem('pda_chain_timer_api_error', '');
-                    localStorage.setItem('pda_chain_timer_count', `${data.chain.current.toLocaleString('en-US')} / ${data.chain.max.toLocaleString('en-US')}`);
+                    localStorage.setItem('pda_chain_timer_count', data.chain.current.toLocaleString('en-US'));
                 } else {
                     // Torn returns {error: {code, error}} for bad keys, access level, rate limits
                     localStorage.setItem('pda_chain_timer_api_error', 'API-ERR' + (data && data.error ? data.error.code : '?'));
@@ -1304,7 +1304,7 @@
 
         const localSeconds = updateLocalTimer();
         const apiSeconds = updateApiTimer(localSeconds > 0);
-        setText(countLabel, localStorage.getItem('pda_chain_timer_count') || '');
+        setText(countLabel, localStorage.getItem('pda_chain_timer_count') || '-');
         updateTargetFlag();
 
         // Alert follows the local timer; the API is the backup when the local one has nothing
