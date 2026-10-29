@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.91
+// @version      3.92
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -113,7 +113,7 @@
     // 25% was then, and the 20% default (0.02) a quarter of the old default
     const MAX_GAIN = 0.1;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.91';
+    const SCRIPT_VERSION = '3.92';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
@@ -322,7 +322,7 @@
             flex-direction: column;
             overflow: hidden;
             width: calc(140px * var(--s));
-            height: calc(78px * var(--s));
+            height: calc(65px * var(--s));
             box-sizing: border-box;
             touch-action: none;
             user-select: none;
@@ -354,9 +354,9 @@
         #pda-timer-ack-btn { background: #b32424 !important; }
         #pda-timer-ack-btn:disabled { opacity: 0.4; cursor: default; }
         #pda-timer-display { position: relative; flex: 1; display: flex; background-color: #111; color: #fff !important; }
-        .pda-timer-half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
+        .pda-timer-half { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
-        .pda-timer-source { position: absolute; left: 0; right: 0; bottom: calc(1px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
+        .pda-timer-source { margin-top: calc(2px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
         #pda-timer-count { flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(10px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
         #pda-settings-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 17, 17, 0.95) !important; display: none; flex-direction: column; padding: 4px 8px; z-index: 10; }
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
