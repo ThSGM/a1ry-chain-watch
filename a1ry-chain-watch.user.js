@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.96
+// @version      3.97
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -88,14 +88,13 @@
 //   sound files) and the screen-edge flash, which pulses faster from the
 //   panic time.
 //
-// Keep screen on (OPT): while a chain is running and the box isn't
-// minimised, the screen is kept from sleeping (Screen Wake Lock, where
-// the browser supports it). The browser drops it while the tab is hidden;
+// Keep screen on (OPT, the second box of "Screen flash/always on"): while
+// a chain is running and the box isn't minimised, the screen is kept from
+// sleeping (Screen Wake Lock, where the browser supports it). The browser drops it while the tab is hidden;
 // it is asked for again when the tab is back.
 //
-// Random targets (tap the timers): a random ID from the target range
-// chosen in OPT (3.0M-3.4M, 4.2M-4.55M or both, the default), never one in
-// excludedIDs. If a target picked this way has more maximum health than
+// Random targets (tap the timers): a random ID from TARGET_RANGES
+// (3.0M-3.4M and 4.2M-4.55M), never one in excludedIDs. If a target picked this way has more maximum health than
 // "Block targets with HP over" in OPT (a slider, 100-2000, default 1000,
 // far left = off), its attack page shows a purple banner at the top, the
 // box border and the defender's panel turn purple, and the Start fight /
@@ -110,13 +109,12 @@
     'use strict';
 
     // Define requirements
-    // User ID ranges that are targeted when the timer is tapped, [min, max] inclusive; OPT
-    // picks one, or both (every ID in either range equally likely)
-    const ID_RANGES = {
-        low: [[3000000, 3400000]],
-        high: [[4200000, 4550000]], // the range of Advanced Target Finder's Chain Save
-        both: [[3000000, 3400000], [4200000, 4550000]]
-    };
+    // User ID ranges that are targeted when the timer is tapped, [min, max] inclusive; every
+    // ID in either range equally likely. The OPT choice between them went in 3.97
+    const TARGET_RANGES = [
+        [3000000, 3400000],
+        [4200000, 4550000] // the range of Advanced Target Finder's Chain Save
+    ];
     // User IDs in the ranges that are never picked
     const excludedIDs = [3133682, 3350281, 3134993, 3397129];
     // Default for "Block targets with HP over" (OPT): a picked target with more maximum health
@@ -138,7 +136,7 @@
     // Health bar: the most it holds
     const HP_MAX = 100;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.96';
+    const SCRIPT_VERSION = '3.97';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // The hit tick for a +1 on the health bar (not in the Sound list; notes as in ALARM_SOUNDS
@@ -269,7 +267,7 @@
         localStorage.setItem('pda_chain_timer_alert_threshold', 150);
     }
     // OPT settings. Read on load, and again when another tab saves them (main loop)
-    let alertThreshold, criticalThreshold, volume, flashEnabled, beepPattern, tickEnabled, rightMode, wakeEnabled, idRange, blockEnabled, bigHealth, boxSize, apiKey;
+    let alertThreshold, criticalThreshold, volume, flashEnabled, beepPattern, tickEnabled, rightMode, wakeEnabled, blockEnabled, bigHealth, boxSize, apiKey;
     function loadSettings() {
         // 0 is a valid setting for both (Off: no alarm / ACK always works)
         const savedAlert = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold'));
@@ -287,8 +285,6 @@
         rightMode = localStorage.getItem('pda_chain_timer_right');
         if (!['timer', 'flappy', 'coins'].includes(rightMode)) rightMode = 'timer';
         wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
-        idRange = localStorage.getItem('pda_chain_timer_id_range');
-        if (!ID_RANGES[idRange]) idRange = 'both';
         // The Block big targets checkbox (3.89); unticked, nothing is blocked whatever the HP limit
         blockEnabled = localStorage.getItem('pda_chain_timer_block') !== 'false';
         // 0 = off. Before 3.81 this was an on/off checkbox (flag_big) with a fixed 500
@@ -431,6 +427,8 @@
         .pda-setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 9px; color: #ccc; }
         .pda-setting-row input { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 1px 3px; width: 70px; }
         .pda-setting-row input[type="checkbox"] { width: auto; margin: 0; }
+        /* Two checkboxes on one row (Screen flash/always on) */
+        .pda-setting-pair { display: flex; gap: 6px; }
         .pda-setting-row select { background: #333; border: 1px solid #555; color: #fff; font-size: 9px; padding: 0 2px; }
         /* Slider / API blocks: a label row, then the input on its own full-width line */
         .pda-setting-block { margin-bottom: 4px; }
@@ -583,20 +581,11 @@
                 </select>
             </div>
             <div class="pda-setting-row">
-                <span title="Flash the screen edges while the alarm sounds">Screen flash:</span>
-                <input type="checkbox" id="pda-flash-input">
-            </div>
-            <div class="pda-setting-row">
-                <span title="Stop the screen from sleeping while a chain is running">Keep screen on:</span>
-                <input type="checkbox" id="pda-wake-input">
-            </div>
-            <div class="pda-setting-row">
-                <span title="ID range for the random target opened by tapping the timers">Target range:</span>
-                <select id="pda-range-input">
-                    <option value="low">3.0M-3.4M</option>
-                    <option value="high">4.2M-4.55M</option>
-                    <option value="both">Both</option>
-                </select>
+                <span title="First box: flash the screen edges while the alarm sounds. Second box: stop the screen from sleeping while a chain is running">Screen flash/always on:</span>
+                <span class="pda-setting-pair">
+                    <input type="checkbox" id="pda-flash-input" title="Flash the screen edges while the alarm sounds">
+                    <input type="checkbox" id="pda-wake-input" title="Stop the screen from sleeping while a chain is running">
+                </span>
             </div>
             <div class="pda-setting-row">
                 <span title="Block Start fight on random targets over the HP limit below">Block big targets:</span>
@@ -678,7 +667,6 @@
     const tickInput = container.querySelector('#pda-tick-input');
     const rightInput = container.querySelector('#pda-right-input');
     const wakeInput = container.querySelector('#pda-wake-input');
-    const rangeInput = container.querySelector('#pda-range-input');
     const blockInput = container.querySelector('#pda-block-input');
     const flagInput = container.querySelector('#pda-flag-input');
     const sizeInput = container.querySelector('#pda-size-input');
@@ -696,7 +684,6 @@
         tickInput.checked = tickEnabled;
         rightInput.value = rightMode;
         wakeInput.checked = wakeEnabled;
-        rangeInput.value = idRange;
         blockInput.checked = blockEnabled;
         flagInput.value = bigHealth || 50; // 50, the far left, shows as Off
         sizeInput.value = boxSize;
@@ -1192,9 +1179,9 @@
         return match ? parseInt(match[2], 10) : null;
     }
 
-    // A random ID from the chosen range(s), each ID equally likely, never an excluded one
+    // A random ID from the ranges, each ID equally likely, never an excluded one
     function randomTargetID() {
-        const ranges = ID_RANGES[idRange];
+        const ranges = TARGET_RANGES;
         const total = ranges.reduce((sum, [min, max]) => sum + max - min + 1, 0);
         let randID;
         do {
@@ -1321,8 +1308,6 @@
         container.dataset.right = rightMode;
         wakeEnabled = wakeInput.checked;
         localStorage.setItem('pda_chain_timer_wake', wakeEnabled);
-        idRange = rangeInput.value;
-        localStorage.setItem('pda_chain_timer_id_range', idRange);
         blockEnabled = blockInput.checked;
         localStorage.setItem('pda_chain_timer_block', blockEnabled);
         // The far left of the slider (below 100) turns the block off
