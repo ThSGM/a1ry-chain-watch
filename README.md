@@ -21,11 +21,21 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
   panic time. The beep
   volume, the screen flash and the box size (75-400 %) are set in **OPT**.
 - Minimised, it gives no alarm at all.
-- Shows the chain count (e.g. `1,234`) in a bar under the timers. The bar is also a health bar
-  (0-100), worked out from the left timer with no API calls. A hit with over 3:00 left gives +1,
-  2:00-3:00 gives -10, 1:00-2:00 gives -20, and under 1:00 drops it to 1, where it flashes red.
+- Shows the chain count and health in a bar under the timers (e.g. `Chain 1,234 | Health 90%`).
+  The bar fills with your health (0-100%), worked out from the left timer with no API calls. A hit
+  with over 3:00 left gives +1, 2:00-3:00 gives -20, 1:00-2:00 gives -50, and under 1:00 drops it
+  to 1, where it flashes red.
   It goes to 0 when the chain ends and starts again from 0 each time you open the browser. Every
   faction hit counts, but only while a tab with the box is open and visible.
+- **Right side** in **OPT** picks what the right half shows:
+  - **Timer** (the default): the API timer.
+  - **Flappy**: a tiny pixel Flappy Bird. Tap to flap, hold to keep flapping. It only runs while the
+    chain timer is above 4:00, and every chain hit drops a coin onto the bird, which glows. Your
+    best score is kept.
+  - **Coins**: your health shown as a coin count (0-100). A +1 pops a coin out, Mario style; a bad
+    hit spills coins.
+- Each hit plays a sound at the alarm volume: a soft marimba note for a +1 (Timer), a coin landing
+  on the bird (Flappy) or a coin sound (Coins). Untick **Hit sound** in **OPT** to turn it off.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
 - Tap **DASH** to open the [dashboard](https://naughtybot.unifiedbot.net/) in a new tab.
 - Tap **MIN** to minimise it; tap the circle to bring it back.

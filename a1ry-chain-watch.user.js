@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.94
+// @version      3.95
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -54,15 +54,27 @@
 // The alert follows the left timer, or the right one when the left has
 // nothing. Chain count (bar under the timers, e.g. 1,234) comes from the API.
 //
-// Health bar (the bar behind the chain count, 0-100, number on the right):
+// Health bar (the bar behind "Chain 1,234 | Health 90%", 0-100):
 //   Scored from the left timer, no API. A hit shows up as the chain end
 //   time jumping forward; the time left just before it gives the score:
-//   over 3:00 +1, 2:00-3:00 -10, 1:00-2:00 -20, under 1:00 straight to 1
+//   over 3:00 +1, 2:00-3:00 -20, 1:00-2:00 -50, under 1:00 straight to 1
 //   (the bar flashes red while at 1). Hits keep it between 1 and 100. Every
 //   faction hit counts (the page can't tell whose it was), and only hits
 //   seen by a visible, unminimised tab that read the time the second
 //   before. 0 when the chain ends and at the start of each browser session
 //   (a session cookie marks it); shared across tabs and page loads.
+//   Hit sound (OPT, on by default): each hit plays a sound at the alarm
+//   volume, in the tab that saw the hit only: with Right side Timer a soft
+//   marimba note for a +1; with Flappy a coin landing on the bird; with
+//   Coins a coin sound for a +1 and a falling "bwoop" for a loss.
+//
+// Right side (OPT): what the right half shows. Timer (the default) is the
+// API timer. Flappy is a tiny one-button game: tap to flap, hold to keep
+// flapping; it only runs while the chain timer is above 4:00 (paused
+// below, and while minimised, hidden or in OPT), and each chain hit drops
+// a coin onto the bird, which glows. Coins shows the health as a coin count
+// (0-100): a +1 pops a coin out, Mario style; a loss spills coins. The API
+// is still polled in the background for the alarm and the chain count.
 //
 // Alarm (both times set in OPT):
 //   At or below the warning time (default 2:30) it flashes and sounds.
@@ -125,9 +137,28 @@
     // Health bar: the most it holds
     const HP_MAX = 100;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.94';
+    const SCRIPT_VERSION = '3.95';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
+    // The hit tick for a +1 on the health bar (not in the Sound list; notes as in ALARM_SOUNDS
+    // below): a soft, low marimba note, with a faint overtone for the wooden strike
+    const HIT_TICK = { notes: [
+        { t: 0, len: 0.25, f: 392, g: 0.7 }, { t: 0, len: 0.06, f: 1568, g: 0.15 }] };
+    // Right side games' sounds (Flappy, Coins), in the ALARM_SOUNDS note format
+    const GAME_SOUNDS = {
+        flap:  { notes: [{ t: 0, len: 0.06, f: 280, f2: 420, type: 'triangle', g: 0.35 }] },
+        score: { notes: [{ t: 0, len: 0.07, f: 523, g: 0.35 }, { t: 0.06, len: 0.1, f: 659, g: 0.35 }] },
+        crash: { notes: [{ t: 0, len: 0.25, f: 160, f2: 55, type: 'triangle', g: 0.8 }, { t: 0, len: 0.12, f: 90, g: 0.6 }] },
+        coin:  { notes: [{ t: 0, len: 0.12, f: 784, g: 0.5 }, { t: 0.08, len: 0.3, f: 1047, g: 0.45 }, { t: 0.08, len: 0.06, f: 3136, g: 0.06 }] },
+        // Coins mode: the classic platformer coin, a quick B5 then a ringing E6 on a square wave
+        marioCoin: { notes: [{ t: 0, len: 0.08, f: 988, type: 'square', g: 0.3 }, { t: 0.08, len: 0.45, f: 1319, type: 'square', g: 0.3 }] },
+        // Coins mode, a bad hit: a short falling "bwoop"
+        coinLoss: { notes: [{ t: 0, len: 0.12, f: 392, f2: 330, type: 'square', g: 0.2 }, { t: 0.12, len: 0.3, f: 262, f2: 131, type: 'square', g: 0.2 }] }
+    };
+
+    // 3x5 pixel digits, one row per 3 bits
+    const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
+                                    '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
     // A note: t start s, len length s, f pitch Hz, f2 pitch to glide to (optional), type waveform
     // (default sine), g loudness relative to the volume setting (default 1; buzzy waveforms
@@ -239,7 +270,7 @@
         localStorage.setItem('pda_chain_timer_alert_threshold', 150);
     }
     // OPT settings. Read on load, and again when another tab saves them (main loop)
-    let alertThreshold, criticalThreshold, volume, flashEnabled, beepPattern, wakeEnabled, idRange, blockEnabled, bigHealth, boxSize, apiKey;
+    let alertThreshold, criticalThreshold, volume, flashEnabled, beepPattern, tickEnabled, rightMode, wakeEnabled, idRange, blockEnabled, bigHealth, boxSize, apiKey;
     function loadSettings() {
         // 0 is a valid setting for both (Off: no alarm / ACK always works)
         const savedAlert = parseInt(localStorage.getItem('pda_chain_timer_alert_threshold'));
@@ -253,6 +284,9 @@
         // Regular, Pulse and Rave (3.78), Warble and Sonic drowning (3.86) are gone; they and
         // anything unknown (or nothing saved yet) become FF6 battle, the default
         if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'ff6';
+        tickEnabled = localStorage.getItem('pda_chain_timer_hit_tick') !== 'false';
+        rightMode = localStorage.getItem('pda_chain_timer_right');
+        if (!['timer', 'flappy', 'coins'].includes(rightMode)) rightMode = 'timer';
         wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
         idRange = localStorage.getItem('pda_chain_timer_id_range');
         if (!ID_RANGES[idRange]) idRange = 'both';
@@ -368,13 +402,18 @@
         #pda-timer-display { position: relative; flex: 1; display: flex; background-color: #111; color: #fff !important; }
         .pda-timer-half { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
+        /* Right side Flappy / Coins: a small canvas over the API timer, scaled up with crisp pixels */
+        #pda-timer-half-api canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; display: none; }
+        #pda-game { touch-action: none; cursor: pointer; }
+        #pda-chain-timer-container[data-right="flappy"] #pda-game, #pda-chain-timer-container[data-right="coins"] #pda-coins { display: block; }
+        #pda-chain-timer-container:not([data-right="timer"]) #pda-timer-text-api, #pda-chain-timer-container:not([data-right="timer"]) #pda-timer-source-api { visibility: hidden; }
         .pda-timer-source { margin-top: calc(2px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
-        #pda-timer-count { position: relative; flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(10px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
+        #pda-timer-count { position: relative; flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(8px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
         /* Health bar: the fill sits behind the chain count; its width and colour are set from
            the script. Effects animate only opacity and transform, so the page isn't repainted */
         #pda-hp-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; transition: width 0.4s ease-out, background-color 0.4s; }
-        #pda-timer-count-text { position: relative; text-shadow: 0 0 2px #000, 0 0 2px #000; }
-        #pda-hp-text { position: absolute; right: calc(3px * var(--s)); top: 0; font-size: calc(7px * var(--s)); font-weight: normal; color: #ddd !important; font-family: Arial, sans-serif; text-shadow: 0 0 2px #000; }
+        /* "Chain 1,234 | Health 90%" over the fill; 8px so it fits the 140px box */
+        #pda-timer-count-text, #pda-hp-text { position: relative; text-shadow: 0 0 2px #000, 0 0 2px #000; }
         #pda-timer-count::after { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; opacity: 0; pointer-events: none; }
         #pda-hp-pop { position: absolute; right: calc(3px * var(--s)); bottom: 100%; z-index: 1; opacity: 0; pointer-events: none; font-family: Arial, sans-serif; text-shadow: 0 0 3px #000; }
         #pda-timer-count.pda-hp-gain::after { background: #4f4; animation: pda-hp-flash 0.6s ease-out; }
@@ -480,6 +519,8 @@
             <div class="pda-timer-half" id="pda-timer-half-api">
                 <span id="pda-timer-text-api">--:--</span>
                 <span class="pda-timer-source" id="pda-timer-source-api"></span>
+                <canvas id="pda-game" width="48" height="24"></canvas>
+                <canvas id="pda-coins" width="48" height="24"></canvas>
             </div>
         </div>
         <div id="pda-timer-count"><div id="pda-hp-fill"></div><span id="pda-timer-count-text"></span><span id="pda-hp-text"></span><span id="pda-hp-pop"></span></div>
@@ -530,6 +571,18 @@
                 </select>
             </div>
             <div class="pda-setting-row">
+                <span title="A sound for each hit: a marimba note (Timer), a coin landing (Flappy) or a coin sound (Coins)">Hit sound:</span>
+                <input type="checkbox" id="pda-tick-input">
+            </div>
+            <div class="pda-setting-row">
+                <span title="What the right half shows: the API timer, a Flappy game or your health as coins">Right side:</span>
+                <select id="pda-right-input">
+                    <option value="timer">Timer</option>
+                    <option value="flappy">Flappy</option>
+                    <option value="coins">Coins</option>
+                </select>
+            </div>
+            <div class="pda-setting-row">
                 <span title="Flash the screen edges while the alarm sounds">Screen flash:</span>
                 <input type="checkbox" id="pda-flash-input">
             </div>
@@ -573,7 +626,9 @@
                 <p><b>Left timer</b> = read from page<br>
                 <b>Right timer</b> = Torn API</p>
                 <p>Click/tap timers for target</p>
-                <p><b>Bottom bar</b> = chain count over health (0-100): hit over 3:00 +1, 2:00-3:00 -10, 1:00-2:00 -20, under 1:00 = 1. Resets when the chain ends or the browser closes</p>
+                <p><b>Hit sound</b> = a sound for each hit (alarm volume)</p>
+                <p><b>Right side</b> = API timer, Flappy (tap/hold to flap, runs above 4:00; hits drop coins) or Coins (health as coins)</p>
+                <p><b>Bottom bar</b> = chain count over health (0-100): hit over 3:00 +1, 2:00-3:00 -20, 1:00-2:00 -50, under 1:00 = 1. Resets when the chain ends or the browser closes</p>
                 <p><b>MIN</b> = minimize<br>
                 <b>OPT</b> = options<br>
                 <b>DASH</b> = open dashboard</p>
@@ -620,6 +675,8 @@
     const volumeInput = container.querySelector('#pda-volume-input');
     const flashInput = container.querySelector('#pda-flash-input');
     const beepInput = container.querySelector('#pda-beep-input');
+    const tickInput = container.querySelector('#pda-tick-input');
+    const rightInput = container.querySelector('#pda-right-input');
     const wakeInput = container.querySelector('#pda-wake-input');
     const rangeInput = container.querySelector('#pda-range-input');
     const blockInput = container.querySelector('#pda-block-input');
@@ -636,6 +693,8 @@
         volumeInput.value = volume;
         flashInput.checked = flashEnabled;
         beepInput.value = beepPattern;
+        tickInput.checked = tickEnabled;
+        rightInput.value = rightMode;
         wakeInput.checked = wakeEnabled;
         rangeInput.value = idRange;
         blockInput.checked = blockEnabled;
@@ -726,8 +785,8 @@
 
         let next, text;
         if (left > 180) { next = hp + 1; text = '+1'; }
-        else if (left >= 120) { next = hp - 10; text = '\u221210'; }
-        else if (left >= 60) { next = hp - 20; text = '\u221220'; }
+        else if (left >= 120) { next = hp - 20; text = '\u221220'; }
+        else if (left >= 60) { next = hp - 50; text = '\u221250'; }
         else { next = 1; text = '\u21921'; }
         setHealth(Math.min(HP_MAX, Math.max(1, next)), { text, gain: left > 180 });
     }
@@ -737,20 +796,29 @@
         localStorage.setItem('pda_chain_timer_hp', hp);
         if (!event) return;
         localStorage.setItem('pda_chain_timer_hp_event', JSON.stringify(event));
-        playHealthEffect(event);
+        playHealthEffect(event, true);
     }
 
-    function playHealthEffect(event) {
+    // local: this tab saw the hit. Only that tab plays the hit sound, so open tabs don't all
+    // sound at once; the others just show it
+    function playHealthEffect(event, local) {
         hpPop.textContent = event.text;
         countBar.classList.remove('pda-hp-gain', 'pda-hp-loss');
         void countBar.offsetWidth; // restarts the animation when the same class comes back
         countBar.classList.add(event.gain ? 'pda-hp-gain' : 'pda-hp-loss');
+
+        const sound = local && tickEnabled;
+        if (rightMode === 'flappy') flappyGame.chainHit(sound);
+        else if (rightMode === 'coins') {
+            const hp = parseInt(localStorage.getItem('pda_chain_timer_hp')) || 0;
+            coinsGame.setHealth(hp, event.gain ? 'gain' : 'loss', sound);
+        } else if (event.gain && sound) playSound(HIT_TICK, volume, null);
     }
 
     // Other tabs' hits. The storage event never fires in the tab that made the change
     window.addEventListener('storage', (e) => {
         if (e.key !== 'pda_chain_timer_hp_event' || !e.newValue) return;
-        try { playHealthEffect(JSON.parse(e.newValue)); } catch (err) { /* not ours */ }
+        try { playHealthEffect(JSON.parse(e.newValue), false); } catch (err) { /* not ours */ }
     });
 
     // Touches the page only when the value changed
@@ -761,9 +829,322 @@
         hpFill.style.width = (hp / HP_MAX * 100) + '%';
         hpFill.style.backgroundColor = hp >= 60 ? '#2a7a2a' : hp >= 30 ? '#9a7400' : '#a82020';
         countBar.classList.toggle('pda-hp-low', hp === 1);
-        setText(hpText, String(hp));
+        coinsGame.setHealth(hp, null, false);
+        setText(hpText, ` | Health ${hp}%`);
         countBar.title = `Health ${hp}/${HP_MAX}`;
     }
+
+    // -------------------------------------------------------------------
+    // Right side: Flappy and Coins (OPT), drawn on 48x24 canvases. Each draws only while
+    // something moves, so they cost nothing the rest of the time
+    // -------------------------------------------------------------------
+    function fillPx(ctx, x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(Math.round(x), Math.round(y), w, h); }
+    // Pixel digits at scale (1 = 3x5), left edge at x
+    function drawNumber(ctx, n, x, y, color, scale) {
+        for (const ch of String(n)) {
+            const bits = DIGITS[+ch];
+            for (let i = 0; i < 15; i++) if (bits[i] === '1') fillPx(ctx, x + (i % 3) * scale, y + Math.floor(i / 3) * scale, scale, scale, color);
+            x += 4 * scale;
+        }
+    }
+    function numberWidth(n, scale) { return String(n).length * 4 * scale - scale; }
+
+    function createFlappy(canvas, play) {
+        const W = canvas.width, H = canvas.height;
+        const ctx = canvas.getContext('2d');
+        const BIRD_X = 10, BIRD = 3;                    // bird is a 3x3 block
+        const GRAVITY = 90, FLAP = -26;                 // px/s², px/s: one flap rises about 4 px
+        const PIPE_W = 4, GAP = 10, SPACING = 22, SPEED = 14;
+        const HOLD_REPEAT = 0.22;                       // s between flaps while held
+        const COL = { sky: '#0e1622', sky2: '#132033', pipe: '#2e8b3e', pipeEdge: '#1b5e28', bird: '#ffd23f', beak: '#ff8c00',
+                                    eye: '#111', coin: '#ffcc00', coinDark: '#b38600', text: '#fff', best: '#8aa' };
+
+        let state = 'ready';       // ready | playing | resume (paused mid-flight, waits for a tap) | dead
+        let active = false;        // chain timer above 4:00 (and visible)
+        let y = H / 2 - 1, vy = 0, pipes = [], score = 0, t = 0, deadAt = 0, readySince = 0;
+        let holding = false, lastFlap = 0;
+        let coins = [], glow = 0;
+        let best = 0;
+        try { best = parseInt(localStorage.getItem('pda_chain_timer_game_best'), 10) || 0; } catch (e) { /* storage blocked */ }
+
+        let raf = 0, last = 0;
+        function wantsFrames() {
+            if (!active) return coins.length > 0 || glow > 0;
+            if (state === 'playing') return true;
+            if (state === 'dead') return t - deadAt < 1;
+            return t - readySince < 8 || coins.length > 0 || glow > 0;  // ready: bob for a while, then sit still
+        }
+        function kick() {
+            if (raf) return;
+            last = performance.now();
+            raf = requestAnimationFrame(frame);
+        }
+        function frame(now) {
+            raf = 0;
+            const dt = Math.min(0.05, (now - last) / 1000);
+            last = now;
+            update(dt);
+            draw();
+            if (wantsFrames()) raf = requestAnimationFrame(frame);
+        }
+
+        function reset() {
+            state = 'ready'; y = H / 2 - 1; vy = 0; pipes = []; score = 0; readySince = t;
+        }
+        function flap() {
+            if (!active) return;
+            if (state === 'dead') { if (t - deadAt > 0.5) reset(); else return; }
+            if (state === 'ready' || state === 'resume') state = 'playing';
+            vy = FLAP; lastFlap = t;
+            play(GAME_SOUNDS.flap);
+        }
+        function die() {
+            if (state !== 'playing') return;
+            state = 'dead'; deadAt = t;
+            play(GAME_SOUNDS.crash);
+            if (score > best) {
+                best = score;
+                try { localStorage.setItem('pda_chain_timer_game_best', best); } catch (e) { /* storage blocked */ }
+            }
+        }
+
+        function update(dt) {
+            t += dt;
+            if (glow > 0) glow = Math.max(0, glow - dt);
+
+            if (active && state === 'playing') {
+                if (holding && t - lastFlap >= HOLD_REPEAT) flap();
+                vy += GRAVITY * dt;
+                y += vy * dt;
+                if (y < 0) { y = 0; vy = 0; }
+                if (!pipes.length || pipes[pipes.length - 1].x < W - SPACING) {
+                    pipes.push({ x: W, gapY: 2 + Math.floor(Math.random() * (H - GAP - 4)), passed: false });
+                }
+                for (const p of pipes) {
+                    p.x -= SPEED * dt;
+                    if (!p.passed && p.x + PIPE_W < BIRD_X) { p.passed = true; score++; play(GAME_SOUNDS.score); }
+                    const overlapX = BIRD_X + BIRD > p.x && BIRD_X < p.x + PIPE_W;
+                    if (overlapX && (y < p.gapY || y + BIRD > p.gapY + GAP)) die();
+                }
+                pipes = pipes.filter(p => p.x + PIPE_W > 0);
+                if (y + BIRD >= H) { y = H - BIRD; die(); }
+            } else if (state === 'ready') {
+                y = H / 2 - 1 + Math.sin(t * 4) * 1.2;          // gentle bob
+            }
+
+            // Coins home in on the bird as they fall
+            const bx = BIRD_X + 1, by = y + 1;
+            for (const c of coins) {
+                c.vy += 70 * dt;
+                c.y += c.vy * dt;
+                c.x += (bx - c.x) * Math.min(1, 5 * dt);
+                if (c.y >= by - 1) {
+                    c.done = true;
+                    glow = 1.5;
+                    if (c.sound) play(GAME_SOUNDS.coin);
+                }
+            }
+            coins = coins.filter(c => !c.done);
+        }
+
+        const px = (x, yy, w, h, color) => fillPx(ctx, x, yy, w, h, color);
+        const number = (n, x, yy, color) => drawNumber(ctx, n, x, yy, color, 1);
+
+        function draw() {
+            px(0, 0, W, H, COL.sky);
+            px(0, H - 1, W, 1, COL.sky2);
+            for (const p of pipes) {
+                px(p.x, 0, PIPE_W, p.gapY, COL.pipe);
+                px(p.x, p.gapY + GAP, PIPE_W, H - p.gapY - GAP, COL.pipe);
+                px(p.x, p.gapY - 1, PIPE_W, 1, COL.pipeEdge);
+                px(p.x, p.gapY + GAP, PIPE_W, 1, COL.pipeEdge);
+            }
+
+            // Glow: a pulsing halo round the bird, fading over 1.5 s
+            if (glow > 0) {
+                const a = (0.35 + 0.35 * Math.sin(t * 25)) * Math.min(1, glow / 0.5);
+                ctx.fillStyle = `rgba(255, 220, 90, ${a})`;
+                ctx.fillRect(BIRD_X - 1, Math.round(y) - 1, BIRD + 2, BIRD + 2);
+                ctx.fillStyle = `rgba(255, 220, 90, ${a * 0.4})`;
+                ctx.fillRect(BIRD_X - 2, Math.round(y) - 2, BIRD + 4, BIRD + 4);
+            }
+            const dead = state === 'dead';
+            px(BIRD_X, y, BIRD, BIRD, dead ? '#c55' : (glow > 0 ? '#fff3b0' : COL.bird));
+            px(BIRD_X + 2, y, 1, 1, COL.eye);
+            px(BIRD_X + 3, y + 1, 1, 1, COL.beak);
+
+            for (const c of coins) {
+                px(c.x - 1, c.y - 1, 2, 2, COL.coin);
+                px(c.x, c.y, 1, 1, COL.coinDark);
+            }
+
+            if (state === 'ready') number(best, 1, 1, COL.best);
+            else number(score, 1, 1, COL.text);
+            if (dead && t - deadAt < 0.15) { ctx.fillStyle = 'rgba(255, 60, 60, 0.4)'; ctx.fillRect(0, 0, W, H); }
+
+            // Paused (timer at or below 4:00): dimmed, with a pause sign
+            if (!active) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'; ctx.fillRect(0, 0, W, H);
+                px(W / 2 - 3, H / 2 - 3, 2, 6, '#aaa');
+                px(W / 2 + 1, H / 2 - 3, 2, 6, '#aaa');
+            }
+        }
+
+        // Press = flap, hold = keep flapping. Stopped here so the box doesn't drag or open a target
+        canvas.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            holding = true;
+            flap();
+            kick();
+        });
+        for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+            canvas.addEventListener(type, () => { holding = false; });
+        }
+        canvas.addEventListener('click', (e) => e.stopPropagation());
+
+        draw();
+        return {
+            // Called every second from the main loop: on above 4:00, off at or below
+            setActive(on) {
+                if (on === active) return;
+                active = on;
+                holding = false;
+                if (on) readySince = t;
+                // Paused mid-flight: it waits in the air for a tap, rather than dropping the bird
+                // the moment a hit brings it back
+                if (on && state === 'playing') state = 'resume';
+                draw();
+                kick();
+            },
+            // A chain hit: a coin drops from the top onto the bird. sound: play the coin sound as it lands
+            chainHit(sound) {
+                if (coins.length >= 5) return;                 // a burst of hits doesn't flood the screen
+                coins.push({ x: BIRD_X + 1 + (Math.random() * 16 - 4), y: -2, vy: 0, sound });
+                kick();
+            }
+        };
+    }
+
+    // Coins mode: the coin count is the health (0-100). A +1 pops a spinning coin up out of the
+    // counter's coin, which falls back, sparkles and adds 1; a loss spills coins out of the bottom
+    // and the number flashes red. Draws only while something is moving
+    function createCoins(canvas, play) {
+        const W = canvas.width, H = canvas.height;
+        const ctx = canvas.getContext('2d');
+        const px = (x, y, w, h, color) => fillPx(ctx, x, y, w, h, color);
+        const COL = { bg: '#111', gold: '#f8c800', dark: '#a86a00', shine: '#fff2a8', x: '#bbb', text: '#fff', bump: '#fff6c0', lost: '#ff5050' };
+        const SPIN = [5, 3, 1, 3];                       // coin widths for the spin frames
+        let shown = 0, target = 0;                       // shown catches up with target as pops land
+        let pops = [], spills = [], sparkles = [], bump = 0, lost = 0;
+        let raf = 0, last = 0;
+
+        // A 5x7 coin, w wide (spinning), centred on cx, top at y
+        function coin(cx, y, w) {
+            const x = Math.round(cx - w / 2);
+            if (w >= 3) {
+                px(x + 1, y, w - 2, 7, COL.dark);
+                px(x, y + 1, w, 5, COL.dark);
+                px(x + 1, y + 1, w - 2, 5, COL.gold);
+                if (w === 5) { px(x + 2, y + 2, 1, 3, COL.shine); }
+            } else {
+                px(x, y, 1, 7, COL.dark);
+            }
+        }
+
+        function layout() {
+            const numW = numberWidth(shown, 2);
+            const total = 5 + 3 + 3 + 3 + numW;            // coin, gap, x, gap, digits
+            const left = Math.floor((W - total) / 2);
+            return { coinX: left + 2.5, xX: left + 8, numX: left + 14, numY: 7 };
+        }
+
+        function draw() {
+            px(0, 0, W, H, COL.bg);
+            const L = layout();
+            coin(L.coinX, 9, 5);
+            // the small "x"
+            px(L.xX, 11, 1, 1, COL.x); px(L.xX + 2, 11, 1, 1, COL.x); px(L.xX + 1, 12, 1, 1, COL.x);
+            px(L.xX, 13, 1, 1, COL.x); px(L.xX + 2, 13, 1, 1, COL.x);
+            const color = lost > 0 ? (Math.floor(lost * 12) % 2 ? COL.lost : COL.text) : bump > 0 ? COL.bump : COL.text;
+            drawNumber(ctx, shown, L.numX, L.numY - (bump > 0 ? 1 : 0), color, 2);
+            for (const p of pops) coin(L.coinX, Math.round(p.y), SPIN[Math.floor(p.age * 16) % 4]);
+            for (const c of spills) coin(L.coinX + c.x, Math.round(c.y), SPIN[Math.floor(c.age * 12) % 4]);
+            for (const sp of sparkles) {
+                const a = 1 - sp.age / 0.35, r = sp.age < 0.15 ? 1 : 2;
+                ctx.fillStyle = `rgba(255, 246, 192, ${a})`;
+                ctx.fillRect(Math.round(L.coinX), sp.y - r, 1, r * 2 + 1);
+                ctx.fillRect(Math.round(L.coinX) - r, sp.y, r * 2 + 1, 1);
+            }
+        }
+
+        function update(dt) {
+            if (bump > 0) bump = Math.max(0, bump - dt);
+            if (lost > 0) lost = Math.max(0, lost - dt);
+            for (const p of pops) {
+                p.age += dt;
+                p.vy += 220 * dt;
+                p.y += p.vy * dt;
+                // Back down to about where it started: it vanishes with a sparkle and counts
+                if (p.vy > 0 && p.y >= 4) {
+                    p.done = true;
+                    sparkles.push({ y: Math.round(p.y) + 3, age: 0 });
+                    if (shown < target) shown++;
+                    bump = 0.15;
+                }
+            }
+            pops = pops.filter(p => !p.done);
+            for (const c of spills) {
+                c.age += dt;
+                c.vy += 120 * dt;
+                c.y += c.vy * dt;
+                c.x += c.vx * dt;
+            }
+            spills = spills.filter(c => c.y < H);
+            for (const sp of sparkles) sp.age += dt;
+            sparkles = sparkles.filter(sp => sp.age < 0.35);
+        }
+
+        function frame(now) {
+            raf = 0;
+            update(Math.min(0.05, (now - last) / 1000));
+            last = now;
+            draw();
+            if (pops.length || spills.length || sparkles.length || bump > 0 || lost > 0) raf = requestAnimationFrame(frame);
+        }
+        function kick() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+
+        draw();
+        return {
+            // hp: the health now; change: 'gain' (a +1 hit), 'loss' (a bad hit) or null (just show it,
+            // e.g. the chain ended); sound: play the coin / loss sound
+            setHealth(hp, change, sound) {
+                if (!change && hp === target) return;        // already showing it (the hit came first)
+                target = hp;
+                if (change === 'gain') {
+                    if (sound) play(GAME_SOUNDS.marioCoin);
+                    if (pops.length < 6) pops.push({ y: 9, vy: -60, age: 0 }); // rises about 8 px, to the top
+                    else shown = target;                       // a big burst: catch up at once
+                } else {
+                    if (change === 'loss') {
+                        if (sound) play(GAME_SOUNDS.coinLoss);
+                        lost = 0.6;
+                        // A few coins tumble out, more for a bigger loss
+                        const n = Math.min(5, Math.max(1, Math.ceil((shown - hp) / 10)));
+                        for (let i = 0; i < n; i++) spills.push({ x: 0, y: 9, vx: (i - (n - 1) / 2) * 14, vy: -25 - Math.random() * 15, age: Math.random() });
+                    }
+                    pops = [];
+                    shown = target;
+                }
+                draw();
+                kick();
+            }
+        };
+    }
+
+    const flappyGame = createFlappy(container.querySelector('#pda-game'), s => playSound(s, volume, null));
+    const coinsGame = createCoins(container.querySelector('#pda-coins'), s => playSound(s, volume, null));
+    container.dataset.right = rightMode;
 
     // -------------------------------------------------------------------
     // 2. Drag Engine with Native Corner Resolution
@@ -979,6 +1360,11 @@
         localStorage.setItem('pda_chain_timer_flash', flashEnabled);
         beepPattern = beepInput.value;
         localStorage.setItem('pda_chain_timer_beep', beepPattern);
+        tickEnabled = tickInput.checked;
+        localStorage.setItem('pda_chain_timer_hit_tick', tickEnabled);
+        rightMode = rightInput.value;
+        localStorage.setItem('pda_chain_timer_right', rightMode);
+        container.dataset.right = rightMode;
         wakeEnabled = wakeInput.checked;
         localStorage.setItem('pda_chain_timer_wake', wakeEnabled);
         idRange = rangeInput.value;
@@ -1097,6 +1483,9 @@
     const playTestSound = () => playSound(beepInput.value, parseInt(volumeInput.value, 10), null);
     volumeInput.addEventListener('change', playTestSound);
     beepInput.addEventListener('change', playTestSound);
+    tickInput.addEventListener('change', () => {
+        if (tickInput.checked) playSound(HIT_TICK, parseInt(volumeInput.value, 10), null);
+    });
 
     // Unlock audio on a tap anywhere on the page, so the alarm can sound after a page load.
     // On touch screens pointerdown doesn't count as a tap that may start audio (iOS and
@@ -1118,7 +1507,8 @@
         } catch(e) { console.error("Audio block:", e); }
     }
 
-    // Plays one cycle of an ALARM_SOUNDS sound. percent: volume, 0-100; bus: node to play
+    // Plays one cycle of an ALARM_SOUNDS sound (name), or of a sound given as an object
+    // (HIT_TICK). percent: volume, 0-100; bus: node to play
     // into (null: straight to the speakers, for the OPT test). Returns false if audio is locked
     function playSound(name, percent, bus) {
         try {
@@ -1127,7 +1517,8 @@
             if (percent <= 0) return true;
             const peak = MAX_GAIN * percent / 100;
             const start = audioCtx.currentTime + 0.02;
-            for (const n of (ALARM_SOUNDS[name] || ALARM_SOUNDS.chime).notes) {
+            const sound = typeof name === 'object' ? name : ALARM_SOUNDS[name] || ALARM_SOUNDS.chime;
+            for (const n of sound.notes) {
                 const t = start + n.t;
                 const g = peak * (n.g || 1);
                 const osc = audioCtx.createOscillator();
@@ -1406,6 +1797,7 @@
             if (settingsSaved !== settingsSeen) {
                 settingsSeen = settingsSaved;
                 loadSettings();
+                container.dataset.right = rightMode;
                 if (settingsPanel.style.display !== 'flex') fillSettingInputs();
             }
 
@@ -1423,18 +1815,22 @@
         if (isPaused || document.hidden) {
             updateAlarm(0);
             updateWakeLock(false);
+            flappyGame.setActive(false);
             return;
         }
 
         const localSeconds = updateLocalTimer();
         const apiSeconds = updateApiTimer(localSeconds > 0);
-        setText(countLabel, localStorage.getItem('pda_chain_timer_count') || '-');
+        setText(countLabel, 'Chain ' + (localStorage.getItem('pda_chain_timer_count') || '-'));
         renderHealth();
         updateTargetFlag();
 
         // Alert follows the local timer; the API is the backup when the local one has nothing
         updateAlarm(localSeconds > 0 ? localSeconds : apiSeconds);
         updateWakeLock(wakeEnabled && (localSeconds > 0 || apiSeconds > 0));
+        // Flappy only plays above 4:00 (like the alarm, the API time when the local one has none)
+        const chainSeconds = localSeconds > 0 ? localSeconds : apiSeconds;
+        flappyGame.setActive(rightMode === 'flappy' && chainSeconds > 240 && !container.classList.contains('pda-settings-open'));
 
     }, 1000);
 })();
