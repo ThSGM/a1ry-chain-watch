@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.97
+// @version      3.98
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -136,7 +136,7 @@
     // Health bar: the most it holds
     const HP_MAX = 100;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.97';
+    const SCRIPT_VERSION = '3.98';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // The hit tick for a +1 on the health bar (not in the Sound list; notes as in ALARM_SOUNDS
@@ -743,21 +743,30 @@
         localStorage.setItem('pda_chain_timer_hp', 0);
         document.cookie = 'a1ry_hp_session=1; path=/; secure; samesite=lax';
     }
-    // When this tab last read a time from the page (MEM doesn't count). A hit is only scored
-    // when the tab read the time the second before, so the time left at the hit is known
-    let lastPageRead = 0;
+    // This tab's last time read from the page (MEM doesn't count): when, what and from which
+    // source. A hit is only scored against a reading from the second before, by the same source
+    let lastPageRead = 0, lastSeconds = 0, lastSrc = '';
     let shownHp = -1;
 
-    // Called with each time read from the page, before saveLocalExpire stores it. The saved end
-    // time is the newest any tab has read, so the first tab to see a hit stores the new end
-    // time and the others then see no jump: each hit is scored once.
+    // Called with each time read from the page, before saveLocalExpire stores it. A hit is the
+    // time read going UP (the timer reset), compared with this tab's reading a second ago from
+    // the same source. Comparing end times instead (3.93-3.97) scored a hit every few seconds
+    // when a source's time stood still (the end time worked out from it creeps forward) or
+    // when the source switched (the attack page header, then the stale sidebar data). The saved
+    // end time is the newest any tab has read, so the first tab to see a hit stores the new
+    // end time and the others then see no jump: each hit is scored once.
     // zeroIsEnd: a 0 from this source means no chain (BAR, COOL, ATK, or SES with no end time;
     // not a stale SES that has run down, nor the loose DOM match)
-    function updateHealth(seconds, zeroIsEnd) {
+    function updateHealth(seconds, zeroIsEnd, src) {
         const now = Date.now();
         const savedExpire = parseInt(localStorage.getItem('pda_chain_timer_local_expire')) || 0;
-        const fresh = now - lastPageRead <= 3000;
+        const comparable = now - lastPageRead <= 3000 && src === lastSrc && lastSeconds > 0;
+        // Time left just before this reading, by this tab's own last reading
+        const left = lastSeconds - (now - lastPageRead) / 1000;
+        const wentUp = seconds > lastSeconds + 1;      // a whole-second reading wobbles by 1
         lastPageRead = now;
+        lastSeconds = seconds;
+        lastSrc = src;
         const hp = parseInt(localStorage.getItem('pda_chain_timer_hp')) || 0;
 
         if (seconds === 0) {
@@ -766,9 +775,12 @@
             if (zeroIsEnd && hp && savedExpire < now + 3000) setHealth(0, null);
             return;
         }
-        // A hit moves the end time forward by minutes; reading jitter is 1-2 s
-        const left = (savedExpire - now) / 1000;
-        if (!fresh || left <= 0 || now + seconds * 1000 - savedExpire <= 3000) return;
+        // Not a reset; or another tab already stored this new end time (within reading wobble).
+        // A hit seconds after the last moves it only a few seconds, so the margin is small
+        const expire = now + seconds * 1000;
+        if (!comparable || !wentUp || left <= 0 || expire - savedExpire <= 1500) return;
+        // Stored now, as saveLocalExpire skips moves under 2 s, so other tabs see it's counted
+        localStorage.setItem('pda_chain_timer_local_expire', expire);
 
         let next, text;
         if (left > 180) { next = hp + 1; text = '+1'; }
@@ -1653,7 +1665,7 @@
         }
 
         if (seconds >= 0) {
-            updateHealth(seconds, zeroIsEnd && src !== 'DOM');
+            updateHealth(seconds, zeroIsEnd && src !== 'DOM', src);
             saveLocalExpire(seconds, src);
         } else {
             // Priority 5: local time saved by this or another tab
