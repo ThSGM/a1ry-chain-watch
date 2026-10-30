@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.93
+// @version      3.94
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -125,7 +125,7 @@
     // Health bar: the most it holds
     const HP_MAX = 100;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.93';
+    const SCRIPT_VERSION = '3.94';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // Alarm sounds, repeated every cycle seconds (whole seconds: the alarm ticks every second).
@@ -1098,16 +1098,23 @@
     volumeInput.addEventListener('change', playTestSound);
     beepInput.addEventListener('change', playTestSound);
 
-    // Unlock audio on a tap anywhere on the page, so the alarm can sound after a page load
-    document.addEventListener('pointerdown', initAudioContext, true);
+    // Unlock audio on a tap anywhere on the page, so the alarm can sound after a page load.
+    // On touch screens pointerdown doesn't count as a tap that may start audio (iOS and
+    // TornPDA ignore it); pointerup, touchend and click do
+    for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) {
+        document.addEventListener(type, initAudioContext, true);
+    }
 
     function initAudioContext() {
         try {
             if (!audioCtx) {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 if (AudioContext) audioCtx = new AudioContext();
+                // iOS 17+: play like media, so the silent switch / silent mode doesn't mute it
+                if (navigator.audioSession) navigator.audioSession.type = 'playback';
             }
-            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            // iOS also leaves it 'interrupted' after a call or switching apps
+            if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume();
         } catch(e) { console.error("Audio block:", e); }
     }
 
@@ -1116,7 +1123,7 @@
     function playSound(name, percent, bus) {
         try {
             initAudioContext();
-            if (!audioCtx || audioCtx.state === 'suspended') return false;
+            if (!audioCtx || audioCtx.state !== 'running') return false;
             if (percent <= 0) return true;
             const peak = MAX_GAIN * percent / 100;
             const start = audioCtx.currentTime + 0.02;
