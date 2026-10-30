@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.95
+// @version      3.96
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -66,15 +66,16 @@
 //   Hit sound (OPT, on by default): each hit plays a sound at the alarm
 //   volume, in the tab that saw the hit only: with Right side Timer a soft
 //   marimba note for a +1; with Flappy a coin landing on the bird; with
-//   Coins a coin sound for a +1 and a falling "bwoop" for a loss.
+//   Coins a Mario-style coin sound.
 //
 // Right side (OPT): what the right half shows. Timer (the default) is the
 // API timer. Flappy is a tiny one-button game: tap to flap, hold to keep
 // flapping; it only runs while the chain timer is above 4:00 (paused
 // below, and while minimised, hidden or in OPT), and each chain hit drops
-// a coin onto the bird, which glows. Coins shows the health as a coin count
-// (0-100): a +1 pops a coin out, Mario style; a loss spills coins. The API
-// is still polled in the background for the alarm and the chain count.
+// a coin onto the bird, which glows. Coins keeps the API timer, and each
+// chain hit knocks a coin up out of its bottom edge, like hitting a block in
+// Mario. With Flappy the API is still polled in the background for the
+// alarm and the chain count.
 //
 // Alarm (both times set in OPT):
 //   At or below the warning time (default 2:30) it flashes and sounds.
@@ -137,7 +138,7 @@
     // Health bar: the most it holds
     const HP_MAX = 100;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.95';
+    const SCRIPT_VERSION = '3.96';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // The hit tick for a +1 on the health bar (not in the Sound list; notes as in ALARM_SOUNDS
@@ -151,9 +152,7 @@
         crash: { notes: [{ t: 0, len: 0.25, f: 160, f2: 55, type: 'triangle', g: 0.8 }, { t: 0, len: 0.12, f: 90, g: 0.6 }] },
         coin:  { notes: [{ t: 0, len: 0.12, f: 784, g: 0.5 }, { t: 0.08, len: 0.3, f: 1047, g: 0.45 }, { t: 0.08, len: 0.06, f: 3136, g: 0.06 }] },
         // Coins mode: the classic platformer coin, a quick B5 then a ringing E6 on a square wave
-        marioCoin: { notes: [{ t: 0, len: 0.08, f: 988, type: 'square', g: 0.3 }, { t: 0.08, len: 0.45, f: 1319, type: 'square', g: 0.3 }] },
-        // Coins mode, a bad hit: a short falling "bwoop"
-        coinLoss: { notes: [{ t: 0, len: 0.12, f: 392, f2: 330, type: 'square', g: 0.2 }, { t: 0.12, len: 0.3, f: 262, f2: 131, type: 'square', g: 0.2 }] }
+        marioCoin: { notes: [{ t: 0, len: 0.08, f: 988, type: 'square', g: 0.3 }, { t: 0.08, len: 0.45, f: 1319, type: 'square', g: 0.3 }] }
     };
 
     // 3x5 pixel digits, one row per 3 bits
@@ -406,7 +405,8 @@
         #pda-timer-half-api canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; display: none; }
         #pda-game { touch-action: none; cursor: pointer; }
         #pda-chain-timer-container[data-right="flappy"] #pda-game, #pda-chain-timer-container[data-right="coins"] #pda-coins { display: block; }
-        #pda-chain-timer-container:not([data-right="timer"]) #pda-timer-text-api, #pda-chain-timer-container:not([data-right="timer"]) #pda-timer-source-api { visibility: hidden; }
+        #pda-coins { pointer-events: none; }
+        #pda-chain-timer-container[data-right="flappy"] #pda-timer-text-api, #pda-chain-timer-container[data-right="flappy"] #pda-timer-source-api { visibility: hidden; }
         .pda-timer-source { margin-top: calc(2px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
         #pda-timer-count { position: relative; flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(8px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
         /* Health bar: the fill sits behind the chain count; its width and colour are set from
@@ -627,7 +627,7 @@
                 <b>Right timer</b> = Torn API</p>
                 <p>Click/tap timers for target</p>
                 <p><b>Hit sound</b> = a sound for each hit (alarm volume)</p>
-                <p><b>Right side</b> = API timer, Flappy (tap/hold to flap, runs above 4:00; hits drop coins) or Coins (health as coins)</p>
+                <p><b>Right side</b> = API timer, Flappy (tap/hold to flap, runs above 4:00; hits drop coins) or Coins (timer; each hit pops a coin out)</p>
                 <p><b>Bottom bar</b> = chain count over health (0-100): hit over 3:00 +1, 2:00-3:00 -20, 1:00-2:00 -50, under 1:00 = 1. Resets when the chain ends or the browser closes</p>
                 <p><b>MIN</b> = minimize<br>
                 <b>OPT</b> = options<br>
@@ -809,10 +809,8 @@
 
         const sound = local && tickEnabled;
         if (rightMode === 'flappy') flappyGame.chainHit(sound);
-        else if (rightMode === 'coins') {
-            const hp = parseInt(localStorage.getItem('pda_chain_timer_hp')) || 0;
-            coinsGame.setHealth(hp, event.gain ? 'gain' : 'loss', sound);
-        } else if (event.gain && sound) playSound(HIT_TICK, volume, null);
+        else if (rightMode === 'coins') coinsGame.chainHit(sound);
+        else if (event.gain && sound) playSound(HIT_TICK, volume, null);
     }
 
     // Other tabs' hits. The storage event never fires in the tab that made the change
@@ -829,7 +827,6 @@
         hpFill.style.width = (hp / HP_MAX * 100) + '%';
         hpFill.style.backgroundColor = hp >= 60 ? '#2a7a2a' : hp >= 30 ? '#9a7400' : '#a82020';
         countBar.classList.toggle('pda-hp-low', hp === 1);
-        coinsGame.setHealth(hp, null, false);
         setText(hpText, ` | Health ${hp}%`);
         countBar.title = `Health ${hp}/${HP_MAX}`;
     }
@@ -1026,17 +1023,17 @@
         };
     }
 
-    // Coins mode: the coin count is the health (0-100). A +1 pops a spinning coin up out of the
-    // counter's coin, which falls back, sparkles and adds 1; a loss spills coins out of the bottom
-    // and the number flashes red. Draws only while something is moving
+    // Coins mode: the API timer stays. Each chain hit knocks a spinning coin up out of the bottom
+    // of the right half, like hitting a block in Mario; it drops back and vanishes with a
+    // sparkle. No counter. The canvas is see-through and ignores taps, so the timer shows and
+    // tapping still opens a target. Draws only while a coin is moving
     function createCoins(canvas, play) {
         const W = canvas.width, H = canvas.height;
         const ctx = canvas.getContext('2d');
         const px = (x, y, w, h, color) => fillPx(ctx, x, y, w, h, color);
-        const COL = { bg: '#111', gold: '#f8c800', dark: '#a86a00', shine: '#fff2a8', x: '#bbb', text: '#fff', bump: '#fff6c0', lost: '#ff5050' };
+        const COL = { gold: '#f8c800', dark: '#a86a00', shine: '#fff2a8' };
         const SPIN = [5, 3, 1, 3];                       // coin widths for the spin frames
-        let shown = 0, target = 0;                       // shown catches up with target as pops land
-        let pops = [], spills = [], sparkles = [], bump = 0, lost = 0;
+        let pops = [], sparkles = [];
         let raf = 0, last = 0;
 
         // A 5x7 coin, w wide (spinning), centred on cx, top at y
@@ -1052,55 +1049,29 @@
             }
         }
 
-        function layout() {
-            const numW = numberWidth(shown, 2);
-            const total = 5 + 3 + 3 + 3 + numW;            // coin, gap, x, gap, digits
-            const left = Math.floor((W - total) / 2);
-            return { coinX: left + 2.5, xX: left + 8, numX: left + 14, numY: 7 };
-        }
-
         function draw() {
-            px(0, 0, W, H, COL.bg);
-            const L = layout();
-            coin(L.coinX, 9, 5);
-            // the small "x"
-            px(L.xX, 11, 1, 1, COL.x); px(L.xX + 2, 11, 1, 1, COL.x); px(L.xX + 1, 12, 1, 1, COL.x);
-            px(L.xX, 13, 1, 1, COL.x); px(L.xX + 2, 13, 1, 1, COL.x);
-            const color = lost > 0 ? (Math.floor(lost * 12) % 2 ? COL.lost : COL.text) : bump > 0 ? COL.bump : COL.text;
-            drawNumber(ctx, shown, L.numX, L.numY - (bump > 0 ? 1 : 0), color, 2);
-            for (const p of pops) coin(L.coinX, Math.round(p.y), SPIN[Math.floor(p.age * 16) % 4]);
-            for (const c of spills) coin(L.coinX + c.x, Math.round(c.y), SPIN[Math.floor(c.age * 12) % 4]);
+            ctx.clearRect(0, 0, W, H);
+            for (const p of pops) coin(p.x, Math.round(p.y), SPIN[Math.floor(p.age * 16) % 4]);
             for (const sp of sparkles) {
                 const a = 1 - sp.age / 0.35, r = sp.age < 0.15 ? 1 : 2;
                 ctx.fillStyle = `rgba(255, 246, 192, ${a})`;
-                ctx.fillRect(Math.round(L.coinX), sp.y - r, 1, r * 2 + 1);
-                ctx.fillRect(Math.round(L.coinX) - r, sp.y, r * 2 + 1, 1);
+                ctx.fillRect(Math.round(sp.x), sp.y - r, 1, r * 2 + 1);
+                ctx.fillRect(Math.round(sp.x) - r, sp.y, r * 2 + 1, 1);
             }
         }
 
         function update(dt) {
-            if (bump > 0) bump = Math.max(0, bump - dt);
-            if (lost > 0) lost = Math.max(0, lost - dt);
             for (const p of pops) {
                 p.age += dt;
                 p.vy += 220 * dt;
                 p.y += p.vy * dt;
-                // Back down to about where it started: it vanishes with a sparkle and counts
-                if (p.vy > 0 && p.y >= 4) {
+                // On the way back down, about halfway: it vanishes with a sparkle
+                if (p.vy > 0 && p.y >= 10) {
                     p.done = true;
-                    sparkles.push({ y: Math.round(p.y) + 3, age: 0 });
-                    if (shown < target) shown++;
-                    bump = 0.15;
+                    sparkles.push({ x: p.x, y: Math.round(p.y) + 3, age: 0 });
                 }
             }
             pops = pops.filter(p => !p.done);
-            for (const c of spills) {
-                c.age += dt;
-                c.vy += 120 * dt;
-                c.y += c.vy * dt;
-                c.x += c.vx * dt;
-            }
-            spills = spills.filter(c => c.y < H);
             for (const sp of sparkles) sp.age += dt;
             sparkles = sparkles.filter(sp => sp.age < 0.35);
         }
@@ -1110,33 +1081,16 @@
             update(Math.min(0.05, (now - last) / 1000));
             last = now;
             draw();
-            if (pops.length || spills.length || sparkles.length || bump > 0 || lost > 0) raf = requestAnimationFrame(frame);
+            if (pops.length || sparkles.length) raf = requestAnimationFrame(frame);
         }
         function kick() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
 
-        draw();
         return {
-            // hp: the health now; change: 'gain' (a +1 hit), 'loss' (a bad hit) or null (just show it,
-            // e.g. the chain ended); sound: play the coin / loss sound
-            setHealth(hp, change, sound) {
-                if (!change && hp === target) return;        // already showing it (the hit came first)
-                target = hp;
-                if (change === 'gain') {
-                    if (sound) play(GAME_SOUNDS.marioCoin);
-                    if (pops.length < 6) pops.push({ y: 9, vy: -60, age: 0 }); // rises about 8 px, to the top
-                    else shown = target;                       // a big burst: catch up at once
-                } else {
-                    if (change === 'loss') {
-                        if (sound) play(GAME_SOUNDS.coinLoss);
-                        lost = 0.6;
-                        // A few coins tumble out, more for a bigger loss
-                        const n = Math.min(5, Math.max(1, Math.ceil((shown - hp) / 10)));
-                        for (let i = 0; i < n; i++) spills.push({ x: 0, y: 9, vx: (i - (n - 1) / 2) * 14, vy: -25 - Math.random() * 15, age: Math.random() });
-                    }
-                    pops = [];
-                    shown = target;
-                }
-                draw();
+            // A chain hit: a coin jumps up from the bottom edge to near the top. sound: play the coin sound
+            chainHit(sound) {
+                if (sound) play(GAME_SOUNDS.marioCoin);
+                if (pops.length >= 6) return;              // a burst of hits doesn't flood the timer
+                pops.push({ x: W / 2 + (Math.random() * 12 - 6), y: H, vy: -98, age: 0 });
                 kick();
             }
         };

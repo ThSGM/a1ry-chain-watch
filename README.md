@@ -32,8 +32,8 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
   - **Flappy**: a tiny pixel Flappy Bird. Tap to flap, hold to keep flapping. It only runs while the
     chain timer is above 4:00, and every chain hit drops a coin onto the bird, which glows. Your
     best score is kept.
-  - **Coins**: your health shown as a coin count (0-100). A +1 pops a coin out, Mario style; a bad
-    hit spills coins.
+  - **Coins**: the API timer, and each chain hit knocks a coin up out of its bottom edge, like
+    hitting a block in Mario.
 - Each hit plays a sound at the alarm volume: a soft marimba note for a +1 (Timer), a coin landing
   on the bird (Flappy) or a coin sound (Coins). Untick **Hit sound** in **OPT** to turn it off.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
