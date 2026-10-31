@@ -32,10 +32,13 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
   - **Flappy**: a tiny pixel Flappy Bird. Tap to flap, hold to keep flapping. It only runs while the
     chain timer is above 4:00, and every chain hit drops a coin onto the bird, which glows. Your
     best score is kept.
-  - **Coins**: the API timer, and each chain hit knocks a coin up out of its bottom edge, like
-    hitting a block in Mario.
+  - **Pet**: a little pixel cat to look after, Tamagotchi style. Each chain hit earns it a coin; a
+    meal costs 20 coins and fills one of its 4 hearts, and a heart drains every hour. It poops after
+    eating, gets sad when very hungry or messy (never sick), and falls asleep if left alone. It
+    cheers when the chain timer passes 4:00 and panics at 3:00 until the next hit. Tap it to wake,
+    clean, feed or play with it; hold to feed.
 - Each hit can play a sound at the alarm volume: a soft marimba note for a +1 (Timer), a coin landing
-  on the bird (Flappy) or a coin sound (Coins). It's off by default: tick **Hit sound** in **OPT**
+  on the bird (Flappy) or a coin sound (Pet, which also cheers and panics out loud). It's off by default: tick **Hit sound** in **OPT**
   to turn it on.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
 - Tap **DASH** to open the [dashboard](https://naughtybot.unifiedbot.net/) in a new tab.

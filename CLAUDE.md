@@ -33,7 +33,7 @@ block at the top of the script lists the timer source codes and every feature in
 | CSS / markup | One `<style>` block, then `container.innerHTML` (header, two timer halves with the canvases, the count/health bar, the OPT panel and help) |
 | Local timer storage | `saveLocalExpire` (writes only when the end time moves by more than 2 s) |
 | Health bar | `updateHealth`, `setHealth`, `playHealthEffect`, `renderHealth`, and the session cookie |
-| Right side | `createFlappy`, `createCoins` (48x24 canvases), `fillPx`, `drawNumber` |
+| Right side | `createFlappy` (48x24), the pet (`loadPet`/`savePet`/`petNow`/`petEarn`, `createPet`, 56x28), `fillPx`, `drawNumber` |
 | 2. Drag | Pointer drag; a tap on the display opens a random target |
 | 3. UI listeners | OPT save (`closeSettingsBtn`), help, ACK, MIN, audio unlock, `renderApiHelp` |
 | 4. Local timer | `updateLocalTimer`: sources BAR / COOL, then ATK, SES, DOM, MEM |
@@ -44,7 +44,7 @@ block at the top of the script lists the timer source codes and every feature in
 
 These are listed roughly by how often they have caused trouble.
 
-### 1. Hit detection (health bar, hit sounds, Flappy and Coins)
+### 1. Hit detection (health bar, hit sounds, Flappy, pet coins)
 No API is used, so a "hit" is inferred from the local timer going back up. This has needed fixing
 twice.
 - **3.93-3.97** compared chain end times, and any forward jump of more than 3 s counted as a hit.
@@ -82,7 +82,7 @@ twice.
   `pda_chain_timer_api_detail` and shows it at the top of the OPT **?** help. Torn errors, HTTP
   errors, network errors and "no key" are all reported, and the key is never shown. Next step: get
   that line from the user.
-- Also check: with Right side set to **Flappy**, the API timer is hidden on purpose.
+- Also check: with Right side set to **Flappy** or **Pet**, the API timer is hidden on purpose.
 - Polling is every 5 s during a chain and every 30 s otherwise, shared across tabs through
   `pda_chain_timer_api_last_call`. A call pending for over 15 s is treated as lost.
 
@@ -99,13 +99,22 @@ twice.
   browser deletes it on close. In TornPDA the cookie may survive backgrounding until the app is
   fully closed.
 
-### 6. Right side modes (`data-right` on the container: timer / flappy / coins)
+### 6. Right side modes (`data-right` on the container: timer / flappy / pet)
 - **Flappy:** the canvas stops `pointerdown`, so the right half can't start a drag or open a target.
   It is active only while the chain time (local, else API) is above 240 s, and not when minimised,
   hidden or in OPT. If paused mid-flight, it waits for a tap. The best score is in
   `pda_chain_timer_game_best`.
-- **Coins:** a see-through canvas over the API timer (`pointer-events: none`). Each hit pops a coin
-  out of the bottom edge. There is no counter; that version (3.95) was rejected.
+- **Pet (4.00):** state in `pda_chain_timer_pet` (`coins`, `hunger` + `hungerAt`, `poops` +
+  `poopAt` due times, `touchAt`), shared across tabs; hunger and poop are derived from timestamps in
+  `petNow`, never by a timer. Tuning constants at the top: `PET_FEED_COST` 20, `PET_HUNGER_STEP` 1 h,
+  `PET_POOP_DELAY` 10 min, `PET_NAP` 10 min. A meal fills 1 heart (user's choice). Coins come from
+  `petEarn()` in `playHealthEffect` for every hit the tab sees, in any Right side mode. The 4:00 cheer
+  and 3:00 panic fire when the chain time crosses the mark between two ticks of a tab showing the pet
+  (`prevChain`); worried while 0 < time <= 180; the panic wakes it. Animation is 2 fps: the main
+  loop's `petGame.tick()` plus one 500 ms timeout (1 fps asleep); `tick(null)` stops it. The canvas
+  stops `pointerdown` (tap = wake/clean/feed/play, 500 ms hold = feed). Sad only, never sick (user's
+  choice). Interaction sounds always play; cheer/panic/hit sounds follow Hit sound.
+- **Coins mode** (3.95-3.99) was removed in 4.00 as unpopular; a saved `coins` falls back to Timer.
 - Hit sounds play only in the tab that saw the hit (`playHealthEffect(event, local)`). Other tabs
   get the effect through the `storage` event on `pda_chain_timer_hp_event`. The **Hit sound**
   setting is off by default (since 3.99) and stored as `pda_chain_timer_hit_sound`; the old

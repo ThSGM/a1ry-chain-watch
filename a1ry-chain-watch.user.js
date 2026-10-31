@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.99
+// @version      4.00
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -66,15 +66,27 @@
 //   Hit sound (OPT, off by default): each hit plays a sound at the alarm
 //   volume, in the tab that saw the hit only: with Right side Timer a soft
 //   marimba note for a +1; with Flappy a coin landing on the bird; with
-//   Coins a Mario-style coin sound.
+//   Pet a coin sound, plus the pet's cheer at 4:00 and panic at 3:00.
 //
 // Right side (OPT): what the right half shows. Timer (the default) is the
 // API timer. Flappy is a tiny one-button game: tap to flap, hold to keep
 // flapping; it only runs while the chain timer is above 4:00 (paused
 // below, and while minimised, hidden or in OPT), and each chain hit drops
-// a coin onto the bird, which glows. Coins keeps the API timer, and each
-// chain hit knocks a coin up out of its bottom edge, like hitting a block in
-// Mario. With Flappy the API is still polled in the background for the
+// a coin onto the bird, which glows. Pet is a Tamagotchi-style cat:
+//   - Each chain hit seen by a tab earns it a coin (whatever Right side
+//     shows); a meal costs PET_FEED_COST coins and fills 1 of 4 hearts,
+//     and a heart drains every PET_HUNGER_STEP. It poops PET_POOP_DELAY
+//     after each meal (3 at most).
+//   - Very hungry (1 heart or none) or 2+ poops: sad. Never sick, never gone.
+//   - Asleep after PET_NAP without a tap.
+//   - Timer: it cheers when the chain timer passes 4:00 ("go hit!"),
+//     panics at 3:00 (waking up for it) and stays worried until a hit;
+//     a hit gives a happy hop.
+//   - Tap: wake / clean / feed if hungry / play. Hold: feed.
+//   State is saved (pda_chain_timer_pet) with timestamps, so it lives on
+//   with the browser closed; it animates at 2 frames a second, only while
+//   shown. Coins mode (3.95-3.99) is gone; it falls back to Timer.
+// With Flappy or Pet the API is still polled in the background for the
 // alarm and the chain count.
 //
 // Alarm (both times set in OPT):
@@ -135,22 +147,33 @@
     const MAX_GAIN = 0.1;
     // Health bar: the most it holds
     const HP_MAX = 100;
+    // Pet (Right side): coins a meal costs (1 coin a chain hit), how often a heart of hunger
+    // drains, how long after a meal it poops, and how long without a tap before it sleeps (ms)
+    const PET_FEED_COST = 20;
+    const PET_HUNGER_STEP = 60 * 60 * 1000;
+    const PET_POOP_DELAY = 10 * 60 * 1000;
+    const PET_NAP = 10 * 60 * 1000;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.99';
+    const SCRIPT_VERSION = '4.00';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // The hit tick for a +1 on the health bar (not in the Sound list; notes as in ALARM_SOUNDS
     // below): a soft, low marimba note, with a faint overtone for the wooden strike
     const HIT_TICK = { notes: [
         { t: 0, len: 0.25, f: 392, g: 0.7 }, { t: 0, len: 0.06, f: 1568, g: 0.15 }] };
-    // Right side games' sounds (Flappy, Coins), in the ALARM_SOUNDS note format
+    // Right side games' sounds (Flappy, Pet), in the ALARM_SOUNDS note format
     const GAME_SOUNDS = {
         flap:  { notes: [{ t: 0, len: 0.06, f: 280, f2: 420, type: 'triangle', g: 0.35 }] },
         score: { notes: [{ t: 0, len: 0.07, f: 523, g: 0.35 }, { t: 0.06, len: 0.1, f: 659, g: 0.35 }] },
         crash: { notes: [{ t: 0, len: 0.25, f: 160, f2: 55, type: 'triangle', g: 0.8 }, { t: 0, len: 0.12, f: 90, g: 0.6 }] },
         coin:  { notes: [{ t: 0, len: 0.12, f: 784, g: 0.5 }, { t: 0.08, len: 0.3, f: 1047, g: 0.45 }, { t: 0.08, len: 0.06, f: 3136, g: 0.06 }] },
-        // Coins mode: the classic platformer coin, a quick B5 then a ringing E6 on a square wave
-        marioCoin: { notes: [{ t: 0, len: 0.08, f: 988, type: 'square', g: 0.3 }, { t: 0.08, len: 0.45, f: 1319, type: 'square', g: 0.3 }] }
+        // Pet: two soft chews, a boing, a sparkle, a happy arpeggio, an "uh-oh" and a no-no
+        petChew:  { notes: [{ t: 0, len: 0.06, f: 330, type: 'triangle', g: 0.35 }, { t: 0.15, len: 0.06, f: 294, type: 'triangle', g: 0.35 }] },
+        petPlay:  { notes: [{ t: 0, len: 0.15, f: 262, f2: 523, g: 0.4 }] },
+        petClean: { notes: [{ t: 0, len: 0.1, f: 659, g: 0.3 }, { t: 0.08, len: 0.2, f: 784, g: 0.3 }] },
+        petCheer: { notes: [392, 494, 587, 784].map((f, n) => ({ t: n * 0.09, len: 0.14, f, type: 'triangle', g: 0.4 })) },
+        petPanic: { notes: [{ t: 0, len: 0.16, f: 587, type: 'triangle', g: 0.5 }, { t: 0.2, len: 0.3, f: 440, type: 'triangle', g: 0.5 }] },
+        petNo:    { notes: [{ t: 0, len: 0.12, f: 196, type: 'triangle', g: 0.4 }, { t: 0.16, len: 0.12, f: 196, type: 'triangle', g: 0.4 }] }
     };
 
     // 3x5 pixel digits, one row per 3 bits
@@ -285,7 +308,8 @@
         // starts with it off, including those whose OPT Save stored the old default
         tickEnabled = localStorage.getItem('pda_chain_timer_hit_sound') === 'true';
         rightMode = localStorage.getItem('pda_chain_timer_right');
-        if (!['timer', 'flappy', 'coins'].includes(rightMode)) rightMode = 'timer';
+        // Coins (3.95-3.99) is gone; it, and anything unknown, becomes Timer
+        if (!['timer', 'flappy', 'pet'].includes(rightMode)) rightMode = 'timer';
         wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
         // The Block big targets checkbox (3.89); unticked, nothing is blocked whatever the HP limit
         blockEnabled = localStorage.getItem('pda_chain_timer_block') !== 'false';
@@ -399,12 +423,11 @@
         #pda-timer-display { position: relative; flex: 1; display: flex; background-color: #111; color: #fff !important; }
         .pda-timer-half { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-family: 'Courier New', Courier, monospace; font-size: calc(17px * var(--s)); line-height: 1; }
         #pda-timer-half-api { border-left: 1px solid #333; }
-        /* Right side Flappy / Coins: a small canvas over the API timer, scaled up with crisp pixels */
+        /* Right side Flappy / Pet: a small canvas over the API timer, scaled up with crisp pixels */
         #pda-timer-half-api canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; display: none; }
-        #pda-game { touch-action: none; cursor: pointer; }
-        #pda-chain-timer-container[data-right="flappy"] #pda-game, #pda-chain-timer-container[data-right="coins"] #pda-coins { display: block; }
-        #pda-coins { pointer-events: none; }
-        #pda-chain-timer-container[data-right="flappy"] #pda-timer-text-api, #pda-chain-timer-container[data-right="flappy"] #pda-timer-source-api { visibility: hidden; }
+        #pda-game, #pda-pet { touch-action: none; cursor: pointer; }
+        #pda-chain-timer-container[data-right="flappy"] #pda-game, #pda-chain-timer-container[data-right="pet"] #pda-pet { display: block; }
+        #pda-chain-timer-container:not([data-right="timer"]) #pda-timer-text-api, #pda-chain-timer-container:not([data-right="timer"]) #pda-timer-source-api { visibility: hidden; }
         .pda-timer-source { margin-top: calc(2px * var(--s)); text-align: center; font-size: calc(7px * var(--s)); font-weight: normal; line-height: 1; color: #777 !important; font-family: Arial, sans-serif; pointer-events: none; white-space: nowrap; }
         #pda-timer-count { position: relative; flex-shrink: 0; background: #222 !important; border-top: 1px solid #333; text-align: center; font-size: calc(8px * var(--s)); font-weight: bold; line-height: calc(12px * var(--s)); color: #fff !important; font-family: 'Courier New', Courier, monospace; white-space: nowrap; }
         /* Health bar: the fill sits behind the chain count; its width and colour are set from
@@ -522,7 +545,7 @@
                 <span id="pda-timer-text-api">--:--</span>
                 <span class="pda-timer-source" id="pda-timer-source-api"></span>
                 <canvas id="pda-game" width="48" height="24"></canvas>
-                <canvas id="pda-coins" width="48" height="24"></canvas>
+                <canvas id="pda-pet" width="56" height="28"></canvas>
             </div>
         </div>
         <div id="pda-timer-count"><div id="pda-hp-fill"></div><span id="pda-timer-count-text"></span><span id="pda-hp-text"></span><span id="pda-hp-pop"></span></div>
@@ -573,15 +596,15 @@
                 </select>
             </div>
             <div class="pda-setting-row">
-                <span title="A sound for each hit: a marimba note (Timer), a coin landing (Flappy) or a coin sound (Coins)">Hit sound:</span>
+                <span title="A sound for each hit: a marimba note (Timer), a coin landing (Flappy) or a coin sound (Pet, which also cheers at 4:00 and panics at 3:00)">Hit sound:</span>
                 <input type="checkbox" id="pda-tick-input">
             </div>
             <div class="pda-setting-row">
-                <span title="What the right half shows: the API timer, a Flappy game or your health as coins">Right side:</span>
+                <span title="What the right half shows: the API timer, a Flappy game or a pet">Right side:</span>
                 <select id="pda-right-input">
                     <option value="timer">Timer</option>
                     <option value="flappy">Flappy</option>
-                    <option value="coins">Coins</option>
+                    <option value="pet">Pet</option>
                 </select>
             </div>
             <div class="pda-setting-row">
@@ -621,7 +644,7 @@
                 <b>Right timer</b> = Torn API</p>
                 <p>Click/tap timers for target</p>
                 <p><b>Hit sound</b> = a sound for each hit (alarm volume)</p>
-                <p><b>Right side</b> = API timer, Flappy (tap/hold to flap, runs above 4:00; hits drop coins) or Coins (timer; each hit pops a coin out)</p>
+                <p><b>Right side</b> = API timer, Flappy (tap/hold to flap, runs above 4:00; hits drop coins) or Pet (hits earn coins; a meal is 20. Tap: wake, clean, feed or play; hold: feed)</p>
                 <p><b>Bottom bar</b> = chain count over health (0-100): hit over 3:00 +1, 2:00-3:00 -20, 1:00-2:00 -50, under 1:00 = 1. Resets when the chain ends or the browser closes</p>
                 <p><b>MIN</b> = minimize<br>
                 <b>OPT</b> = options<br>
@@ -813,8 +836,9 @@
         countBar.classList.add(event.gain ? 'pda-hp-gain' : 'pda-hp-loss');
 
         const sound = local && tickEnabled;
+        if (local) petEarn();
         if (rightMode === 'flappy') flappyGame.chainHit(sound);
-        else if (rightMode === 'coins') coinsGame.chainHit(sound);
+        else if (rightMode === 'pet') petGame.chainHit(sound);
         else if (event.gain && sound) playSound(HIT_TICK, volume, null);
     }
 
@@ -837,7 +861,7 @@
     }
 
     // -------------------------------------------------------------------
-    // Right side: Flappy and Coins (OPT), drawn on 48x24 canvases. Each draws only while
+    // Right side: Flappy and Pet (OPT), drawn on small canvases. Each draws only while
     // something moves, so they cost nothing the rest of the time
     // -------------------------------------------------------------------
     function fillPx(ctx, x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(Math.round(x), Math.round(y), w, h); }
@@ -1028,81 +1052,303 @@
         };
     }
 
-    // Coins mode: the API timer stays. Each chain hit knocks a spinning coin up out of the bottom
-    // of the right half, like hitting a block in Mario; it drops back and vanishes with a
-    // sparkle. No counter. The canvas is see-through and ignores taps, so the timer shows and
-    // tapping still opens a target. Draws only while a coin is moving
-    function createCoins(canvas, play) {
+    // Pet: a little Tamagotchi-style cat in the right half (56x28, colour pixels). See the notes
+    // at the top of the script. Its state is saved with timestamps (hunger and poop are worked
+    // out when drawn, never by a background timer) and shared across tabs; the animation is
+    // per tab, at 2 frames a second: the main loop's tick plus one half-second timeout, and
+    // only while it's shown
+    const PET_PAL = {
+        o: '#7a2f52', b: '#ff9ec0', i: '#ff6f9f', k: '#1a1a1a', w: '#ffffff', p: '#ff5f8f', u: '#6fc3ff',
+        h: '#ff4f7a', y: '#ffe14f', z: '#ffe14f', c: '#f8c800', d: '#a86a00', n: '#2f6a3a', q: '#a8692d', m: '#7a4a1f'
+    };
+    // Sprites: one letter per pixel (PET_PAL), '.' empty. The cat is 18 wide: ears, then head
+    const PET_EARS_UP = [
+        '.oo............oo.',
+        '.oio..........oio.',
+        '.oiio........oiio.',
+        '.oiiooooooooooiio.'
+    ];
+    const PET_EARS_DOWN = [         // folded out and down: sad, asleep
+        '..................',
+        '..................',
+        'oio............oio',
+        '.oiooooooooooooio.'
+    ];
+    const PET_HEAD = [
+        '.obbbbbbbbbbbbbbo.',
+        'obbbbbbbbbbbbbbbbo',
+        'obbbbbbbbbbbbbbbbo',
+        'obbbbbbbbbbbbbbbbo',
+        'obbbbbbbbbbbbbbbbo',
+        'obbbbbbbbbbbbbbbbo',
+        'obbbbbbbbbbbbbbbbo',
+        '.obbbbbbbbbbbbbbo.',
+        '..oobbbbbbbbbboo..',
+        '....oooooooooo....',
+        '....oo......oo....'
+    ];
+    // Faces: [x, y] within the cat, by colour letter
+    const PET_EYES = {
+        open:   { k: [[4, 6], [5, 6], [4, 7], [5, 7], [4, 8], [5, 8], [12, 6], [13, 6], [12, 7], [13, 7], [12, 8], [13, 8]], w: [[4, 6], [12, 6]] },
+        closed: { k: [[3, 7], [4, 8], [5, 8], [6, 7], [11, 7], [12, 8], [13, 8], [14, 7]] },
+        happy:  { k: [[3, 8], [4, 7], [5, 7], [6, 8], [11, 8], [12, 7], [13, 7], [14, 8]] },
+        wide:   { w: [[3, 5], [4, 5], [5, 5], [6, 5], [3, 6], [6, 6], [3, 7], [6, 7], [3, 8], [4, 8], [5, 8], [6, 8], [11, 5], [12, 5], [13, 5], [14, 5], [11, 6], [14, 6], [11, 7], [14, 7], [11, 8], [12, 8], [13, 8], [14, 8]],
+                  k: [[4, 6], [5, 6], [4, 7], [5, 7], [12, 6], [13, 6], [12, 7], [13, 7]] },
+        sad:    { k: [[4, 7], [5, 7], [4, 8], [5, 8], [12, 7], [13, 7], [12, 8], [13, 8], [3, 5], [4, 5], [13, 5], [14, 5]], w: [[4, 7], [12, 7]], u: [[5, 9], [5, 10]] }
+    };
+    const PET_MOUTHS = {
+        smile: { k: [[7, 9], [8, 10], [9, 10], [10, 9]] },
+        open:  { k: [[7, 9], [8, 9], [9, 9], [10, 9], [7, 10], [10, 10]], p: [[8, 10], [9, 10]] },
+        o:     { k: [[8, 9], [9, 9], [7, 10], [10, 10], [8, 11], [9, 11]] },
+        frown: { k: [[7, 11], [8, 10], [9, 10], [10, 11]] },
+        chew:  { k: [[7, 10], [8, 10], [9, 10], [10, 10]] }
+    };
+    const PET_CHEEKS = { p: [[2, 9], [3, 9], [14, 9], [15, 9]] };
+    const PET_SPRITES = {
+        poop: ['...m...', '..mmq..', '.mmmmm.', 'mmqmmmm'],
+        food: ['.www.', 'wwwww', 'wwwww', 'nnnnn'],          // a rice ball
+        heart: ['hh.hh', 'hhhhh', '.hhh.', '..h..'],
+        smallHeart: ['h.h', 'hhh', '.h.'],
+        note: ['..yy', '..y.', '..y.', 'yyy.', 'yy..'],
+        bubble: ['.wwwww.', 'wwwkwww', 'wwwkwww', 'wwwkwww', 'wwwwwww', 'wwwkwww', '.wwwww.', '..ww...'],
+        z: ['zzz', '..z', '.z.', 'z..', 'zzz'],
+        coin: ['.cc.', 'cddc', 'cddc', '.cc.']
+    };
+    // Steps (half seconds) each action lasts
+    const PET_STEPS = { cheer: 9, panic: 6, relief: 4, eat: 6, play: 5, clean: 3, wake: 2, no: 3 };
+
+    function loadPet() {
+        let st = null;
+        try { st = JSON.parse(localStorage.getItem('pda_chain_timer_pet')); } catch (e) { /* none yet */ }
+        const now = Date.now();
+        return Object.assign({ coins: 0, hunger: 4, hungerAt: now, poops: 0, poopAt: [], touchAt: now }, st);
+    }
+    function savePet(st) { localStorage.setItem('pda_chain_timer_pet', JSON.stringify(st)); }
+    // Hunger (0-4 hearts) and poops (0-3) now, from the saved state and the time passed
+    function petNow(st, now) {
+        return {
+            hunger: Math.max(0, st.hunger - Math.floor((now - st.hungerAt) / PET_HUNGER_STEP)),
+            poops: Math.min(3, st.poops + st.poopAt.filter(t => t <= now).length)
+        };
+    }
+    // A chain hit seen by this tab: +1 coin, whatever the Right side shows
+    function petEarn() {
+        const st = loadPet();
+        st.coins++;
+        savePet(st);
+    }
+
+    function createPet(canvas, play) {
         const W = canvas.width, H = canvas.height;
         const ctx = canvas.getContext('2d');
-        const px = (x, y, w, h, color) => fillPx(ctx, x, y, w, h, color);
-        const COL = { gold: '#f8c800', dark: '#a86a00', shine: '#fff2a8' };
-        const SPIN = [5, 3, 1, 3];                       // coin widths for the spin frames
-        let pops = [], sparkles = [];
-        let raf = 0, last = 0;
+        let x = 22, dir = 1, frame = 0, blink = false;
+        let action = null, step = 0;
+        let prevChain = -1;            // chain seconds at the last tick, for the 4:00 and 3:00 marks
+        let chainSeconds = 0, shown = false, halfStep = 0;
 
-        // A 5x7 coin, w wide (spinning), centred on cx, top at y
-        function coin(cx, y, w) {
-            const x = Math.round(cx - w / 2);
-            if (w >= 3) {
-                px(x + 1, y, w - 2, 7, COL.dark);
-                px(x, y + 1, w, 5, COL.dark);
-                px(x + 1, y + 1, w - 2, 5, COL.gold);
-                if (w === 5) { px(x + 2, y + 2, 1, 3, COL.shine); }
-            } else {
-                px(x, y, 1, 7, COL.dark);
+        function sprite(rows, sx, sy) {
+            rows.forEach((row, j) => {
+                for (let i = 0; i < row.length; i++) {
+                    if (row[i] === '.') continue;
+                    ctx.fillStyle = PET_PAL[row[i]];
+                    ctx.fillRect(sx + i, sy + j, 1, 1);
+                }
+            });
+        }
+        function dots(set, sx, sy) {
+            for (const key in set) {
+                ctx.fillStyle = PET_PAL[key];
+                for (const [i, j] of set[key]) ctx.fillRect(sx + i, sy + j, 1, 1);
             }
         }
+        // x for something w wide next to the cat's head: right of it if there's room, else left.
+        // Beside rather than above, so it never covers the coins and hearts along the top
+        const beside = (px, w) => (px + 19 + w <= W ? px + 19 : px - w - 1);
+
+        function start(name) { action = name; step = 0; }
+        const worried = () => chainSeconds > 0 && chainSeconds <= 180;
+        // Asleep after PET_NAP without a tap; never while worried (below 3:00) or mid-action
+        const isAsleep = (st, now) => !action && !worried() && now - st.touchAt > PET_NAP;
 
         function draw() {
-            ctx.clearRect(0, 0, W, H);
-            for (const p of pops) coin(p.x, Math.round(p.y), SPIN[Math.floor(p.age * 16) % 4]);
-            for (const sp of sparkles) {
-                const a = 1 - sp.age / 0.35, r = sp.age < 0.15 ? 1 : 2;
-                ctx.fillStyle = `rgba(255, 246, 192, ${a})`;
-                ctx.fillRect(Math.round(sp.x), sp.y - r, 1, r * 2 + 1);
-                ctx.fillRect(Math.round(sp.x) - r, sp.y, r * 2 + 1, 1);
+            const now = Date.now();
+            const st = loadPet();
+            const { hunger, poops } = petNow(st, now);
+            const sleeping = isAsleep(st, now);
+            fillPx(ctx, 0, 0, W, H, '#111111');
+            fillPx(ctx, 0, H - 1, W, 1, '#262626');
+
+            // Coins top left, hunger hearts top right
+            sprite(PET_SPRITES.coin, 1, 1);
+            drawNumber(ctx, st.coins, 6, 1, '#ffffff', 1);
+            for (let i = 0; i < 4; i++) {
+                if (i < hunger) sprite(PET_SPRITES.smallHeart, W - 16 + i * 4, 1);
+                else { ctx.fillStyle = '#333333'; for (const [a, b] of [[0, 0], [2, 0], [0, 1], [1, 1], [2, 1], [1, 2]]) ctx.fillRect(W - 16 + i * 4 + a, 1 + b, 1, 1); }
             }
+            for (let i = 0; i < poops; i++) {
+                const px = W - 9 - i * 8, s = frame % 2;
+                sprite(PET_SPRITES.poop, px, H - 5);
+                fillPx(ctx, px + 1 + s, H - 8, 1, 2, PET_PAL.m);      // stink lines
+                fillPx(ctx, px + 5 - s, H - 9, 1, 2, PET_PAL.m);
+            }
+
+            let cx = x, y = H - 16, ears = PET_EARS_UP, eyes = 'open', mouth = 'smile';
+            const extras = [], s = step;
+            const sad = hunger <= 1 || poops >= 2;
+
+            if (sleeping) {
+                ears = PET_EARS_DOWN; eyes = 'closed'; mouth = 'chew'; y += 1;
+            } else if (action === 'cheer') {                    // 4:00 - yay, go hit!
+                y -= [0, 4, 6, 4, 0, 4, 6, 4, 0][s] || 0;
+                eyes = 'happy'; mouth = 'open';
+                extras.push(['arms'], ['note', cx - 6 + (s % 2) * 2, y - 2 - (s % 3)], ['note', cx + 19, y + 1 - ((s + 1) % 3)]);
+            } else if (action === 'panic') {                    // 3:00 - !!!
+                cx += s % 2 ? 2 : -2;
+                y -= s < 2 ? 3 : 0;
+                eyes = 'wide'; mouth = 'o';
+                extras.push(['bubble', beside(x, 7), Math.max(6, y - 3)], ['sweat', cx - 3, y + 6], ['sweat', cx + 19, y + 8]);
+            } else if (action === 'relief' || action === 'play') {
+                y -= (action === 'relief' ? [0, 5, 3, 0] : [0, 5, 7, 5, 0])[s] || 0;
+                eyes = 'happy'; mouth = 'open';
+                extras.push(['heart', beside(cx, 5), Math.max(6, y + 1 - (action === 'relief' ? s : 0))]);
+            } else if (action === 'eat') {
+                mouth = s % 2 ? 'open' : 'chew'; eyes = s >= 4 ? 'happy' : 'closed';
+                if (s < 4) extras.push(['food', beside(cx, 5), H - 6, Math.min(s, 3)]);
+            } else if (action === 'clean') {
+                eyes = 'happy';
+                extras.push(['sparkle', W - 6, H - 4, s + 1]);
+            } else if (action === 'wake') {
+                eyes = s < 1 ? 'closed' : 'open'; mouth = 'o';
+            } else if (action === 'no') {                       // can't afford a meal: head shake
+                cx += s % 2 ? 1 : -1;
+                eyes = 'sad'; mouth = 'frown';
+            } else if (worried()) {
+                cx += frame % 2;
+                eyes = 'wide'; mouth = 'frown';
+                if (frame % 3 !== 2) extras.push(['sweat', cx + 18, y + 3 + (frame % 3)]);
+            } else if (sad) {
+                ears = PET_EARS_DOWN; eyes = 'sad'; mouth = 'frown';
+            } else {
+                if (frame % 2) y += 1;                          // happy bob
+                if (blink) eyes = 'closed';
+            }
+
+            sprite(ears, cx, y);
+            sprite(PET_HEAD, cx, y + 4);
+            dots(PET_CHEEKS, cx, y);
+            dots(PET_EYES[eyes], cx, y);
+            dots(PET_MOUTHS[mouth], cx, y);
+            for (const e of extras) {
+                if (e[0] === 'arms') for (const [a, b] of [[-1, 9], [-2, 8], [18, 9], [19, 8]]) fillPx(ctx, cx + a, y + b, 1, 1, PET_PAL.o);
+                else if (e[0] === 'sweat') dots({ u: [[1, 0], [0, 1], [1, 1], [0, 2], [1, 2]] }, e[1], e[2]);
+                else if (e[0] === 'food') sprite(PET_SPRITES.food.slice(e[3]), e[1], e[2] + e[3]);
+                else if (e[0] === 'sparkle') { const r = e[3]; for (const [a, b] of [[0, -r], [0, r], [-r, 0], [r, 0]]) fillPx(ctx, e[1] + a, e[2] + b, 1, 1, PET_PAL.y); }
+                else sprite(PET_SPRITES[e[0]], e[1], e[2]);
+            }
+            // A hit: the coin hops out on the other side from the heart
+            if (action === 'relief' && s < 3) sprite(PET_SPRITES.coin, beside(cx, 5) > cx ? Math.max(0, cx - 6) : cx + 20, H - 6 - [0, 6, 9][s]);
+
+            if (sleeping) {
+                ctx.fillStyle = 'rgba(0, 0, 25, 0.55)';
+                ctx.fillRect(0, 0, W, H);
+                const zy = y - (frame % 3) * 2;
+                sprite(PET_SPRITES.z, cx + 18, zy);
+                if (frame % 3 === 2) sprite(PET_SPRITES.z, cx + 22, zy - 5);
+            }
+            // What the cat is doing, for advance: it only wanders when happy and idle
+            return sleeping ? 'asleep' : (sad || worried()) ? 'still' : 'happy';
         }
 
-        function update(dt) {
-            for (const p of pops) {
-                p.age += dt;
-                p.vy += 220 * dt;
-                p.y += p.vy * dt;
-                // On the way back down, about halfway: it vanishes with a sparkle
-                if (p.vy > 0 && p.y >= 10) {
-                    p.done = true;
-                    sparkles.push({ x: p.x, y: Math.round(p.y) + 3, age: 0 });
-                }
+        // One half-second step of the animation
+        function advance() {
+            frame++;
+            blink = Math.random() < 0.1;
+            if (action && ++step >= PET_STEPS[action]) action = null;
+            const state = draw();
+            // Wander when happy and idle, a pixel every second
+            if (!action && state === 'happy' && frame % 2 === 0) {
+                x += dir;
+                if (x <= 2 || x >= W - 21 || Math.random() < 0.1) dir = -dir;
             }
-            pops = pops.filter(p => !p.done);
-            for (const sp of sparkles) sp.age += dt;
-            sparkles = sparkles.filter(sp => sp.age < 0.35);
+            return state;
         }
 
-        function frame(now) {
-            raf = 0;
-            update(Math.min(0.05, (now - last) / 1000));
-            last = now;
+        // Tap: wake, clean, feed when hungry, else play. Hold: feed
+        function feed(st, now) {
+            const { hunger, poops } = petNow(st, now);
+            if (st.coins < PET_FEED_COST || hunger >= 4) { start('no'); play(GAME_SOUNDS.petNo); return; }
+            st.coins -= PET_FEED_COST;
+            st.hunger = Math.min(4, hunger + 1);
+            st.hungerAt = now;
+            // Poop already due is kept as poop; one more comes a while after this meal
+            st.poops = poops;
+            st.poopAt = st.poopAt.filter(t => t > now).concat(now + PET_POOP_DELAY).slice(-3);
+            start('eat');
+            play(GAME_SOUNDS.petChew);
+        }
+        function touch(hold) {
+            const now = Date.now();
+            const st = loadPet();
+            const wasAsleep = isAsleep(st, now);
+            st.touchAt = now;
+            const { hunger, poops } = petNow(st, now);
+            if (hold) feed(st, now);
+            else if (wasAsleep) { start('wake'); play(GAME_SOUNDS.petPlay); }
+            else if (poops) {
+                st.poops = 0;
+                st.poopAt = st.poopAt.filter(t => t > now);
+                start('clean');
+                play(GAME_SOUNDS.petClean);
+            } else if (hunger <= 2 && st.coins >= PET_FEED_COST) feed(st, now);
+            else { start('play'); play(GAME_SOUNDS.petPlay); }
+            savePet(st);
             draw();
-            if (pops.length || sparkles.length) raf = requestAnimationFrame(frame);
         }
-        function kick() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+
+        let holdTimer = 0, held = false;
+        canvas.addEventListener('pointerdown', (e) => {
+            // Stopped here so the box doesn't drag or open a target
+            e.stopPropagation();
+            e.preventDefault();
+            held = false;
+            holdTimer = setTimeout(() => { held = true; touch(true); }, 500);
+        });
+        canvas.addEventListener('pointerup', () => { clearTimeout(holdTimer); if (!held) touch(false); held = true; });
+        for (const type of ['pointercancel', 'pointerleave']) canvas.addEventListener(type, () => { clearTimeout(holdTimer); held = true; });
+        canvas.addEventListener('click', (e) => e.stopPropagation());
 
         return {
-            // A chain hit: a coin jumps up from the bottom edge to near the top. sound: play the coin sound
+            // From the main loop every second: seconds = the chain time, or null when the pet
+            // isn't shown (minimised, hidden, OPT open or another Right side), which stops it
+            tick(seconds, sound) {
+                clearTimeout(halfStep);
+                if (seconds === null) { shown = false; prevChain = -1; return; }
+                chainSeconds = seconds;
+                // The two marks, once each as the timer passes them
+                if (prevChain > 240 && seconds <= 240 && seconds > 180) { start('cheer'); if (sound) play(GAME_SOUNDS.petCheer); }
+                if (prevChain > 180 && seconds <= 180 && seconds > 0) {
+                    const st = loadPet();
+                    st.touchAt = Date.now();                    // it wakes up for this
+                    savePet(st);
+                    start('panic');
+                    if (sound) play(GAME_SOUNDS.petPanic);
+                }
+                prevChain = seconds;
+                shown = true;
+                // Asleep: 1 frame a second is enough for the Zz
+                if (advance() !== 'asleep') halfStep = setTimeout(() => { if (shown) advance(); }, 500);
+            },
+            // A chain hit: a happy hop and a coin
             chainHit(sound) {
-                if (sound) play(GAME_SOUNDS.marioCoin);
-                if (pops.length >= 6) return;              // a burst of hits doesn't flood the timer
-                pops.push({ x: W / 2 + (Math.random() * 12 - 6), y: H, vy: -98, age: 0 });
-                kick();
+                start('relief');
+                if (sound) play(GAME_SOUNDS.coin);
+                if (shown) draw();
             }
         };
     }
 
     const flappyGame = createFlappy(container.querySelector('#pda-game'), s => playSound(s, volume, null));
-    const coinsGame = createCoins(container.querySelector('#pda-coins'), s => playSound(s, volume, null));
+    const petGame = createPet(container.querySelector('#pda-pet'), s => playSound(s, volume, null));
     container.dataset.right = rightMode;
 
     // -------------------------------------------------------------------
@@ -1390,7 +1636,7 @@
             const lastCall = parseInt(localStorage.getItem('pda_chain_timer_api_last_call')) || 0;
             text = detail ? `${detail.text} (${Math.round((Date.now() - detail.time) / 1000)}s ago)` : 'no reply yet';
             text += lastCall ? `. Last call ${Math.round((Date.now() - lastCall) / 1000)}s ago` : '. Not called yet';
-            if (rightMode === 'flappy') text += '. Right side is Flappy, so the API timer is hidden';
+            if (rightMode !== 'timer') text += `. Right side is ${rightMode === 'flappy' ? 'Flappy' : 'Pet'}, so the API timer is hidden`;
         }
         setText(helpApi, 'API: ' + text);
     }
@@ -1803,6 +2049,7 @@
             updateAlarm(0);
             updateWakeLock(false);
             flappyGame.setActive(false);
+            petGame.tick(null);
             return;
         }
 
@@ -1817,7 +2064,9 @@
         updateWakeLock(wakeEnabled && (localSeconds > 0 || apiSeconds > 0));
         // Flappy only plays above 4:00 (like the alarm, the API time when the local one has none)
         const chainSeconds = localSeconds > 0 ? localSeconds : apiSeconds;
-        flappyGame.setActive(rightMode === 'flappy' && chainSeconds > 240 && !container.classList.contains('pda-settings-open'));
+        const settingsOpen = container.classList.contains('pda-settings-open');
+        flappyGame.setActive(rightMode === 'flappy' && chainSeconds > 240 && !settingsOpen);
+        petGame.tick(rightMode === 'pet' && !settingsOpen ? chainSeconds : null, tickEnabled);
 
     }, 1000);
 })();
