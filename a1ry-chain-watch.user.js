@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      4.00
+// @version      4.02
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -154,7 +154,7 @@
     const PET_POOP_DELAY = 10 * 60 * 1000;
     const PET_NAP = 10 * 60 * 1000;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '4.00';
+    const SCRIPT_VERSION = '4.02';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // The hit tick for a +1 on the health bar (not in the Sound list; notes as in ALARM_SOUNDS
@@ -464,12 +464,12 @@
         #pda-api-status:empty { display: none; }
         #pda-api-status.pda-api-ok { color: #6c6; }
         #pda-api-status.pda-api-bad { color: #f66; }
-        /* Slim sliders: thin track, small round thumb (webkit = Chrome/Safari/PDA, moz = Firefox) */
-        .pda-setting-block > input[type="range"] { -webkit-appearance: none; appearance: none; height: 14px; padding: 0; border: none; background: transparent; cursor: pointer; }
+        /* Slim sliders: thin track, round 16px thumb (12px until 4.02: too small to grab on phones) (webkit = Chrome/Safari/PDA, moz = Firefox) */
+        .pda-setting-block > input[type="range"] { -webkit-appearance: none; appearance: none; height: 18px; padding: 0; border: none; background: transparent; cursor: pointer; }
         .pda-setting-block > input[type="range"]::-webkit-slider-runnable-track { height: 3px; background: #555; border-radius: 2px; }
-        .pda-setting-block > input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border-radius: 50%; background: #ddd; border: none; }
+        .pda-setting-block > input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6.5px; border-radius: 50%; background: #ddd; border: none; }
         .pda-setting-block > input[type="range"]::-moz-range-track { height: 3px; background: #555; border-radius: 2px; }
-        .pda-setting-block > input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #ddd; border: none; }
+        .pda-setting-block > input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #ddd; border: none; }
         .pda-setting-buttons { display: flex; gap: 4px; margin-top: 2px; }
         #pda-settings-close { background: #2a662a !important; flex: 1; }
         /* Help scrolls on its own; pan-y overrides the box's touch-action: none so it scrolls on touch */
@@ -1356,7 +1356,10 @@
     // -------------------------------------------------------------------
     // Pointer events cover mouse (desktop) and touch (PDA) alike
     container.addEventListener('pointerdown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'A' || settingsPanel.style.display === 'flex') return;
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+        // With OPT open, only the header drags: on the panel a drag would fight the sliders,
+        // dropdowns and the scrolling help
+        if (settingsPanel.style.display === 'flex' && !e.target.closest('#pda-timer-header')) return;
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         isDragging = true;
         hasMoved = false;
