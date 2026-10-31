@@ -34,8 +34,9 @@ Tap **?** in **OPT** for what the codes mean; they're also listed at the top of 
     best score is kept.
   - **Coins**: the API timer, and each chain hit knocks a coin up out of its bottom edge, like
     hitting a block in Mario.
-- Each hit plays a sound at the alarm volume: a soft marimba note for a +1 (Timer), a coin landing
-  on the bird (Flappy) or a coin sound (Coins). Untick **Hit sound** in **OPT** to turn it off.
+- Each hit can play a sound at the alarm volume: a soft marimba note for a +1 (Timer), a coin landing
+  on the bird (Flappy) or a coin sound (Coins). It's off by default: tick **Hit sound** in **OPT**
+  to turn it on.
 - Drag the box anywhere. Tap the timers to open the attack page of a random target.
 - Tap **DASH** to open the [dashboard](https://naughtybot.unifiedbot.net/) in a new tab.
 - Tap **MIN** to minimise it; tap the circle to bring it back.

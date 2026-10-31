@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         a1ry Chain Watch
 // @namespace    https://github.com/ThSGM/a1ry-chain-watch
-// @version      3.98
+// @version      3.99
 // @description  Movable Torn chain timer for desktop, mobile and TornPDA: local and API timers side by side, with an adjustable alert
 // @author       ThSGM
 // @homepageURL  https://github.com/ThSGM/a1ry-chain-watch
@@ -63,7 +63,7 @@
 //   seen by a visible, unminimised tab that read the time the second
 //   before. 0 when the chain ends and at the start of each browser session
 //   (a session cookie marks it); shared across tabs and page loads.
-//   Hit sound (OPT, on by default): each hit plays a sound at the alarm
+//   Hit sound (OPT, off by default): each hit plays a sound at the alarm
 //   volume, in the tab that saw the hit only: with Right side Timer a soft
 //   marimba note for a +1; with Flappy a coin landing on the bird; with
 //   Coins a Mario-style coin sound.
@@ -95,7 +95,7 @@
 //
 // Random targets (tap the timers): a random ID from TARGET_RANGES
 // (3.0M-3.4M and 4.2M-4.55M), never one in excludedIDs. If a target picked this way has more maximum health than
-// "Block targets with HP over" in OPT (a slider, 100-2000, default 1000,
+// "Block targets with HP over" in OPT (a slider, 100-3000, default 1000,
 // far left = off), its attack page shows a purple banner at the top, the
 // box border and the defender's panel turn purple, and the Start fight /
 // Join fight button is greyed out and does nothing (found by its text, as
@@ -136,7 +136,7 @@
     // Health bar: the most it holds
     const HP_MAX = 100;
     // Keep in step with @version above (GM_info isn't available in every userscript host)
-    const SCRIPT_VERSION = '3.98';
+    const SCRIPT_VERSION = '3.99';
     // OPT's Update button: the script's Greasy Fork page, whose Install button updates it
     const UPDATE_URL = 'https://greasyfork.org/en/scripts/601300-a1ry-chain-watch';
     // The hit tick for a +1 on the health bar (not in the Sound list; notes as in ALARM_SOUNDS
@@ -281,7 +281,9 @@
         // Regular, Pulse and Rave (3.78), Warble and Sonic drowning (3.86) are gone; they and
         // anything unknown (or nothing saved yet) become FF6 battle, the default
         if (!ALARM_SOUNDS[beepPattern]) beepPattern = 'ff6';
-        tickEnabled = localStorage.getItem('pda_chain_timer_hit_tick') !== 'false';
+        // Off unless ticked. A new key since 3.99 (was hit_tick, on by default), so everyone
+        // starts with it off, including those whose OPT Save stored the old default
+        tickEnabled = localStorage.getItem('pda_chain_timer_hit_sound') === 'true';
         rightMode = localStorage.getItem('pda_chain_timer_right');
         if (!['timer', 'flappy', 'coins'].includes(rightMode)) rightMode = 'timer';
         wakeEnabled = localStorage.getItem('pda_chain_timer_wake') !== 'false';
@@ -451,6 +453,8 @@
         #pda-help { display: none; margin-top: 4px; max-height: 160px; overflow-y: auto; touch-action: pan-y; font-size: 8px; line-height: 1.3; color: #999; }
         #pda-help p { margin: 0 0 4px; }
         #pda-help b { color: #ddd; }
+        /* The last API reply, selectable so it can be copied */
+        #pda-help-api { color: #ccc; user-select: text; -webkit-user-select: text; word-break: break-word; }
         /* While OPT is open the box grows to fit the panel, which replaces the timers. The panel
            has its own fixed sizes (not scaled by Size) and is 220px wide, but never wider than the
            screen. Sizes are set directly rather than with zoom/transform, which would also move
@@ -596,7 +600,7 @@
                     <span title="On the attack page of a random target with more maximum health than this, Start fight is blocked. Far left = off">Block targets with HP over: <b class="pda-slider-value"></b></span>
                     <button class="pda-btn pda-default-btn" data-default="${DEFAULT_BIG_HEALTH}" title="Default: ${DEFAULT_BIG_HEALTH}">Default</button>
                 </div>
-                <input type="range" id="pda-flag-input" min="50" max="2000" step="50">
+                <input type="range" id="pda-flag-input" min="50" max="3000" step="50">
             </div>
             <div class="pda-setting-block">
                 <div class="pda-setting-row">
@@ -612,6 +616,7 @@
                 <a class="pda-btn" id="pda-update-btn" href="${UPDATE_URL}" target="_blank" rel="noopener" title="Open the script's Greasy Fork page to install the latest version">Update</a>
             </div>
             <div id="pda-help">
+                <p id="pda-help-api"></p>
                 <p><b>Left timer</b> = read from page<br>
                 <b>Right timer</b> = Torn API</p>
                 <p>Click/tap timers for target</p>
@@ -659,6 +664,7 @@
     const closeSettingsBtn = container.querySelector('#pda-settings-close');
     const helpBtn = container.querySelector('#pda-help-btn');
     const helpPanel = container.querySelector('#pda-help');
+    const helpApi = container.querySelector('#pda-help-api');
     const thresholdInput = container.querySelector('#pda-threshold-input');
     const criticalInput = container.querySelector('#pda-critical-input');
     const volumeInput = container.querySelector('#pda-volume-input');
@@ -1314,7 +1320,7 @@
         beepPattern = beepInput.value;
         localStorage.setItem('pda_chain_timer_beep', beepPattern);
         tickEnabled = tickInput.checked;
-        localStorage.setItem('pda_chain_timer_hit_tick', tickEnabled);
+        localStorage.setItem('pda_chain_timer_hit_sound', tickEnabled);
         rightMode = rightInput.value;
         localStorage.setItem('pda_chain_timer_right', rightMode);
         container.dataset.right = rightMode;
@@ -1369,7 +1375,26 @@
 
     helpBtn.addEventListener('click', () => {
         helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
+        renderApiHelp();
     });
+
+    // Top of the help: what the last API call got back, in full (the label under the right
+    // timer only has room for a code). Never shows the key
+    function renderApiHelp() {
+        if (helpPanel.style.display !== 'block') return;
+        let text;
+        if (!apiKey) text = 'no key set (enter one above and press Save)';
+        else {
+            let detail = null;
+            try { detail = JSON.parse(localStorage.getItem('pda_chain_timer_api_detail')); } catch (e) { /* none yet */ }
+            const lastCall = parseInt(localStorage.getItem('pda_chain_timer_api_last_call')) || 0;
+            text = detail ? `${detail.text} (${Math.round((Date.now() - detail.time) / 1000)}s ago)` : 'no reply yet';
+            text += lastCall ? `. Last call ${Math.round((Date.now() - lastCall) / 1000)}s ago` : '. Not called yet';
+            if (rightMode === 'flappy') text += '. Right side is Flappy, so the API timer is hidden';
+        }
+        setText(helpApi, 'API: ' + text);
+    }
+
 
     // Minimising closes OPT without saving: while OPT is open the box ignores presses,
     // so the circle could never be tapped open again
@@ -1686,10 +1711,14 @@
         localStorage.setItem('pda_chain_timer_api_last_call', Date.now());
         // One call at a time, so a slow reply can't overwrite a newer one
         apiCallStarted = Date.now();
+        // The full outcome, for the help (renderApiHelp)
+        const saveDetail = (text) => localStorage.setItem('pda_chain_timer_api_detail', JSON.stringify({ time: Date.now(), text }));
+        let status = 0;
         fetch(`https://api.torn.com/faction/?selections=chain&key=${apiKey}`)
-            .then(response => response.json())
+            .then(response => { status = response.status; return response.json(); })
             .then(data => {
                 if (data && data.chain && typeof data.chain.timeout === 'number') {
+                    saveDetail(`OK, chain ${data.chain.current}, ${data.chain.timeout}s left`);
                     localStorage.setItem('pda_chain_timer_api_expire', Date.now() + (data.chain.timeout * 1000));
                     localStorage.setItem('pda_chain_timer_api_time', Date.now());
                     localStorage.setItem('pda_chain_timer_api_error', '');
@@ -1698,11 +1727,16 @@
                     // Torn returns {error: {code, error}} for bad keys, access level, rate limits
                     localStorage.setItem('pda_chain_timer_api_error', 'API-ERR' + (data && data.error ? data.error.code : '?'));
                     console.error('Chain timer API error:', data && data.error);
+                    saveDetail(data && data.error
+                        ? `Torn error ${data.error.code}: ${data.error.error}`
+                        : `unexpected reply (HTTP ${status}): ${JSON.stringify(data).slice(0, 150)}`);
                 }
             })
             .catch(err => {
                 localStorage.setItem('pda_chain_timer_api_error', 'API-NET');
                 console.error(err);
+                // HTTP set: Torn answered but not with JSON (e.g. an error page); else no answer
+                saveDetail(status ? `HTTP ${status}, not a Torn API reply (${err.message})` : `network error: ${err.name}: ${err.message}`);
             })
             .finally(() => { apiCallStarted = 0; });
     }
@@ -1763,6 +1797,8 @@
         }
 
         // Minimised means no alarm at all, even below the panic time
+        renderApiHelp();
+
         if (isPaused || document.hidden) {
             updateAlarm(0);
             updateWakeLock(false);
